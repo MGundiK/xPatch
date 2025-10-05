@@ -57,10 +57,14 @@ class DECOMP(nn.Module):
             sigma = gauss_sigma1 or sigma_from_alpha(alpha)
             self.ma = GaussianMA(sigma, learnable=gauss_learnable, truncate=gauss_truncate)
 
-        elif self.ma_type == 'gauss_adaptive':
-            sigmas = gauss_sigmas or [2.5, 4.0, 6.0, 9.0, 14.0]
-            self.ma = AdaptiveGaussianTrend(sigmas=sigmas, truncate=gauss_truncate,
-                                            cond_hidden=gauss_cond_hidden, pool=gauss_pool)
+        elif ma_type == 'gauss_adaptive':
+            self.ma = AdaptiveGaussianTrend(
+                sigmas=getattr(configs, 'adaptive_sigmas', (2.5, 4.0, 6.0, 9.0, 14.0)),
+                truncate=getattr(configs, 'adaptive_truncate', 4.0),
+                cond_hidden=getattr(configs, 'adaptive_cond_hidden', 32),
+                pool=getattr(configs, 'adaptive_pool', 16),
+            )
+
 
         elif self.ma_type == 'doghybrid':
             sigma1 = gauss_sigma1 or 4.0
