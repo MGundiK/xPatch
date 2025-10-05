@@ -14,8 +14,6 @@ random.seed(fix_seed)
 torch.manual_seed(fix_seed)
 np.random.seed(fix_seed)
 
-# torch.cuda.manual_seed_all(fix_seed)
-
 parser = argparse.ArgumentParser(description='xPatch')
 
 # basic configs
@@ -48,22 +46,46 @@ parser.add_argument('--patch_len', type=int, default=16, help='patch length')
 parser.add_argument('--stride', type=int, default=8, help='patch stride')
 parser.add_argument('--padding_patch', type=str, default='end', help='None: no padding, end: pad to end')
 
-# decomposition
-parser.add_argument('--ma_type', type=str, default='ema', help='decomposition type: ema | dema | gauss | gauss2')
+# decomposition (UPDATED)
+parser.add_argument(
+    '--ma_type',
+    type=str,
+    default='ema',
+    help='decomposition type: reg | ema | dema | gauss | gauss_adaptive | doghybrid | lp_learnable | tcn_trend'
+)
 parser.add_argument('--alpha', type=float, default=0.3, help='EMA smoothing coefficient')
 parser.add_argument('--beta', type=float, default=0.3, help='DEMA smoothing coefficient')
 
-# ---------------- NEW: Gaussian decomposition parameters ----------------
-# Minimal additions so your Model/DECOMP can read them.
-parser.add_argument('--gauss_sigma1', type=float, default=None, help='Gaussian sigma for first pass (overrides alpha->sigma mapping)')
-parser.add_argument('--gauss_sigma2', type=float, default=None, help='Gaussian sigma for second pass (gauss2)')
-parser.add_argument('--gauss_P1', type=int, default=None, help='Period (samples) for first pass; used with gauss_mult1 to compute sigma1')
-parser.add_argument('--gauss_mult1', type=float, default=None, help='Multiplier for sigma1 (sigma1 = P1 * mult1)')
-parser.add_argument('--gauss_P2', type=int, default=None, help='Period (samples) for second pass (gauss2)')
-parser.add_argument('--gauss_mult2', type=float, default=None, help='Multiplier for sigma2 (sigma2 = P2 * mult2)')
-parser.add_argument('--gauss_learnable', action='store_true', help='Learnable sigma(s)')
+# -------- Gaussian (single-pass) --------
+parser.add_argument('--gauss_sigma1', type=float, default=None, help='Gaussian sigma (overrides alpha->sigma mapping)')
+parser.add_argument('--gauss_P1', type=int, default=None, help='Period (samples); used with gauss_mult1 to compute sigma')
+parser.add_argument('--gauss_mult1', type=float, default=None, help='Multiplier for sigma (sigma = P1 * mult1)')
+parser.add_argument('--gauss_learnable', action='store_true', help='Make Gaussian sigma learnable')
 parser.add_argument('--gauss_truncate', type=float, default=4.0, help='Kernel truncation radius in sigmas')
-# -----------------------------------------------------------------------
+
+# -------- Adaptive Gaussian --------
+parser.add_argument('--adaptive_sigmas', type=str, default=None,
+                    help='Comma-separated sigma list for adaptive Gaussian, e.g. "2.5,4,6,9,14"')
+parser.add_argument('--adaptive_truncate', type=float, default=4.0, help='Truncation for adaptive Gaussian kernels')
+parser.add_argument('--adaptive_cond_hidden', type=int, default=32, help='Hidden size for conditioner MLP')
+parser.add_argument('--adaptive_pool', type=int, default=16, help='Pooling window for local stats')
+
+# -------- Hybrid EMA + DoG --------
+parser.add_argument('--dog_sigma1', type=float, default=4.2, help='DoG small sigma')
+parser.add_argument('--dog_sigma2', type=float, default=96.0, help='DoG large sigma')
+parser.add_argument('--dog_truncate', type=float, default=4.0, help='Truncation for DoG Gaussians')
+
+# -------- Learnable LP --------
+parser.add_argument('--lp_kernel_size', type=int, default=21, help='Kernel size for learnable LP')
+parser.add_argument('--lp_mode', type=str, default='centered', help='LP mode: centered | causal')
+parser.add_argument('--lp_ema_alpha', type=float, default=0.3, help='EMA-like initialization for LP kernel')
+
+# -------- TCN Smoother --------
+parser.add_argument('--tcn_hidden_mult', type=float, default=1.0, help='Hidden width multiplier for TCN smoother')
+parser.add_argument('--tcn_n_blocks', type=int, default=2, help='Number of TCN blocks')
+parser.add_argument('--tcn_kernel', type=int, default=7, help='Kernel size per depthwise conv in TCN')
+parser.add_argument('--tcn_beta', type=float, default=0.3, help='Residual smoothing strength in TCN')
+parser.add_argument('--tcn_final_avg', type=int, default=0, help='Final average window; 0 disables')
 
 # optimization
 parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
@@ -87,6 +109,19 @@ parser.add_argument('--devices', type=str, default='0,1,2,3', help='device ids o
 parser.add_argument('--test_flop', action='store_true', help='test flops')
 
 args = parser.parse_args()
+
+# Parse adaptive_sigmas if provided as CSV
+def _parse_float_list_csv(s):
+    if s is None:
+        return None
+    if isinstance(s, str):
+        s = s.strip()
+        if not s:
+            return None
+        return [float(x) for x in s.split(',')]
+    return s
+
+args.adaptive_sigmas = _parse_float_list_csv(args.adaptive_sigmas)
 
 # gpu validation
 if args.use_gpu and torch.cuda.is_available():
