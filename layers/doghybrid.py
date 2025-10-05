@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Sequence, Tuple
 
 class EMA_Trend(nn.Module):
     """Fast EMA trend with scalar alpha (can be made learnable if desired)."""
