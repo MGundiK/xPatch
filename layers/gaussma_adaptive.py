@@ -51,16 +51,21 @@ class AdaptiveGaussianTrend(nn.Module):
         kernels = [ _gauss_kernel1d(s, self.truncate, dtype=dtype, device=device) for s in self.sigmas ]
         return kernels  # list of [K_i]
 
-    def _local_mean_var(self, x: torch.Tensor, k: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        # x [B,T,C] -> use AvgPool1d over time with same-padding by reflection
-        B,T,C = x.shape
-        x_bCt = x.transpose(1,2)  # [B,C,T]
-        pad = (k - 1) // 2
-        x_pad = F.pad(x_bCt, (pad, pad), mode='reflect')
-        mean = F.avg_pool1d(x_pad, kernel_size=k, stride=1)              # [B,C,T]
-        mean2 = F.avg_pool1d(x_pad**2, kernel_size=k, stride=1)
-        var = (mean2 - mean**2).clamp_min(0.0)
-        return mean.transpose(1,2), var.transpose(1,2)  # [B,T,C]
+    def _local_mean_var(self, x: torch.Tensor, k: int):
+        # x [B,T,C] -> use AvgPool1d over time with "same" output length
+        B, T, C = x.shape
+        x_bCt = x.transpose(1, 2)  # [B,C,T]
+    
+        # Asymmetric "same" padding for any k (odd or even)
+        padL = (k - 1) // 2
+        padR = k - 1 - padL  # ensures padL + padR = k - 1
+        x_pad = F.pad(x_bCt, (padL, padR), mode='reflect')
+    
+        mean  = F.avg_pool1d(x_pad, kernel_size=k, stride=1)          # [B,C,T]
+        mean2 = F.avg_pool1d(x_pad * x_pad, kernel_size=k, stride=1)  # [B,C,T]
+        var = (mean2 - mean * mean).clamp_min(0.0)
+        return mean.transpose(1, 2), var.transpose(1, 2)  # [B,T,C]
+
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
