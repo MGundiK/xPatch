@@ -2,6 +2,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+def _gauss_kernel1d(sigma: float, truncate: float = 4.0, dtype=torch.float32, device=None):
+    radius = max(1, int(truncate * sigma))
+    x = torch.arange(-radius, radius + 1, device=device, dtype=dtype)
+    k = torch.exp(-0.5 * (x / sigma) ** 2)
+    k = k / (k.sum() + 1e-12)
+    return k  # [K]
+
+def _depthwise_conv1d_centered(x_btC: torch.Tensor, kernel_1d: torch.Tensor) -> torch.Tensor:
+    # x: [B,T,C]  -> Conv1d expects [B,C,T]
+    B, T, C = x_btC.shape
+    x_bCt = x_btC.transpose(1, 2)  # [B,C,T]
+    k = kernel_1d.to(x_bCt.dtype).to(x_bCt.device)  # [K]
+    k = k.view(1, 1, -1).repeat(C, 1, 1)           # [C,1,K] depthwise
+    pad = (k.shape[-1] - 1) // 2
+    y = F.conv1d(x_bCt, k, bias=None, stride=1, padding=pad, groups=C)
+    return y.transpose(1, 2)  # [B,T,C]
+
 class EMA_Trend(nn.Module):
     """Fast EMA trend with scalar alpha (can be made learnable if desired)."""
     def __init__(self, alpha: float = 0.3):
