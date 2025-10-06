@@ -54,17 +54,15 @@ class Model(nn.Module):
             dog_truncate = getattr(configs, "dog_truncate", 4.0),
         )
 
-        # Learnable LP (needs channels)
+        # Learnable LP (needs channels)--(no 'channels')
         lp_kwargs = dict(
-            channels     = c_in,
             lp_kernel    = getattr(configs, "lp_kernel_size", 21),
             lp_mode      = getattr(configs, "lp_mode", "centered"),
             lp_ema_alpha = getattr(configs, "lp_ema_alpha", 0.3),
         )
 
-        # TCN smoother (needs channels)
+        # TCN smoother (needs channels)--(no 'channels')
         tcn_kwargs = dict(
-            channels        = c_in,
             tcn_hidden_mult = getattr(configs, "tcn_hidden_mult", 1.0),
             tcn_blocks      = getattr(configs, "tcn_n_blocks", 2),
             tcn_kernel      = getattr(configs, "tcn_kernel", 7),
@@ -77,6 +75,7 @@ class Model(nn.Module):
             ma_type=self.ma_type,
             alpha=alpha,
             beta=beta,
+            channels=c_in,
             **gauss_kwargs,
             **adaptive_kwargs,
             **dog_kwargs,
