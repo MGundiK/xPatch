@@ -39,12 +39,13 @@ class Model(nn.Module):
             gauss_truncate  = getattr(configs, "gauss_truncate", 4.0),
         )
 
-        # --- Adaptive Gaussian (namespaced) ---
+        # --- Adaptive Gaussian (CAUSAL) ---
         adaptive_kwargs = dict(
             adaptive_sigmas       = getattr(configs, "adaptive_sigmas", (2.5, 4.0, 6.0, 9.0, 14.0)),
             adaptive_truncate     = getattr(configs, "adaptive_truncate", 4.0),
             adaptive_cond_hidden  = getattr(configs, "adaptive_cond_hidden", 32),
             adaptive_pool         = getattr(configs, "adaptive_pool", 16),
+            adaptive_causal       = getattr(configs, "adaptive_causal", True),  # <-- added
         )
 
         # --- Hybrid EMA + DoG (namespaced) ---
@@ -54,14 +55,14 @@ class Model(nn.Module):
             dog_truncate = getattr(configs, "dog_truncate", 4.0),
         )
 
-        # Learnable LP (needs channels)--(no 'channels')
+        # Learnable LP (no 'channels' here)
         lp_kwargs = dict(
             lp_kernel    = getattr(configs, "lp_kernel_size", 21),
             lp_mode      = getattr(configs, "lp_mode", "centered"),
             lp_ema_alpha = getattr(configs, "lp_ema_alpha", 0.3),
         )
 
-        # TCN smoother (needs channels)--(no 'channels')
+        # TCN smoother (no 'channels' here)
         tcn_kwargs = dict(
             tcn_hidden_mult = getattr(configs, "tcn_hidden_mult", 1.0),
             tcn_blocks      = getattr(configs, "tcn_n_blocks", 2),
