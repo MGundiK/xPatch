@@ -63,16 +63,18 @@ parser.add_argument('--gauss_mult1', type=float, default=None, help='Multiplier 
 parser.add_argument('--gauss_learnable', action='store_true', help='Make Gaussian sigma learnable')
 parser.add_argument('--gauss_truncate', type=float, default=4.0, help='Kernel truncation radius in sigmas')
 
-# -------- Adaptive Gaussian --------
-# Adaptive Gaussian params
-# -------- Adaptive Gaussian (Causal or Centered) --------
-parser.add_argument('--adaptive_sigmas', type=lambda s: [float(x) for x in s.split(',')], default=[2.5,4.0,6.0,9.0,14.0],
-    help='List of sigmas for adaptive Gaussian mixture'
-)
-parser.add_argument('--adaptive_truncate', type=float, default=4.0, help='Truncation for adaptive Gaussian kernels')
-parser.add_argument('--adaptive_cond_hidden', type=int, default=32, help='Hidden dim for conditioner MLP')
-parser.add_argument('--adaptive_pool', type=int, default=16, help='Pooling size for local stats')
-parser.add_argument('--adaptive_causal', action='store_true', help='Use causal convolution for adaptive Gaussian')
+# -------- Adaptive Gaussian (Causal) --------
+parser.add_argument('--adaptive_sigmas', type=lambda s: [float(x) for x in s.split(',')],
+                    default=[2.5,4.0,6.0,9.0,14.0],
+                    help='List of sigmas for causal adaptive Gaussian mixture')
+parser.add_argument('--adaptive_truncate', type=float, default=4.0,
+                    help='Truncation for adaptive Gaussian kernels')
+parser.add_argument('--adaptive_cond_hidden', type=int, default=32,
+                    help='Hidden dim for conditioner MLP')
+parser.add_argument('--adaptive_stat_window', type=int, default=16,
+                    help='Causal window length for local mean/var')
+parser.add_argument('--adaptive_add_x_feature', action='store_true',
+                    help='Include raw x as a conditioner feature')
 
 
 
