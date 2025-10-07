@@ -46,11 +46,12 @@ class DECOMP(nn.Module):
         gauss_truncate: float = 4.0,
 
         # ---------- Adaptive Gaussian (causal) ----------
+        # Adaptive Gaussian (CAUSAL)
         adaptive_sigmas: Optional[List[float]] = None,
         adaptive_truncate: float = 4.0,
         adaptive_cond_hidden: int = 32,
-        adaptive_pool: int = 16,
-        adaptive_causal: bool = True,  # NEW
+        adaptive_stat_window: int = 16,          # <-- use this
+        adaptive_add_x_feature: bool = True,     # <-- and this
 
         # ---------- DoG Hybrid ----------
         dog_sigma1: float = 4.2,
@@ -94,9 +95,10 @@ class DECOMP(nn.Module):
                 sigmas=sigmas,
                 truncate=adaptive_truncate,
                 cond_hidden=adaptive_cond_hidden,
-                pool=adaptive_pool,
-                causal=adaptive_causal,
+                stat_window=adaptive_stat_window,   # <-- renamed
+                add_x_feature=adaptive_add_x_feature,  # <-- new toggle
             )
+
 
         elif self.ma_type == 'doghybrid':
             self.ma = HybridEMA_DoG(
