@@ -40,13 +40,15 @@ class Model(nn.Module):
         )
 
         # --- Adaptive Gaussian (CAUSAL) ---
+        # --- Adaptive Gaussian (CAUSAL) ---
         adaptive_kwargs = dict(
-            adaptive_sigmas       = getattr(configs, "adaptive_sigmas", (2.5, 4.0, 6.0, 9.0, 14.0)),
-            adaptive_truncate     = getattr(configs, "adaptive_truncate", 4.0),
-            adaptive_cond_hidden  = getattr(configs, "adaptive_cond_hidden", 32),
-            adaptive_pool         = getattr(configs, "adaptive_pool", 16),
-            adaptive_causal       = getattr(configs, "adaptive_causal", True),  # <-- added
+            adaptive_sigmas        = getattr(configs, "adaptive_sigmas", (2.5, 4.0, 6.0, 9.0, 14.0)),
+            adaptive_truncate      = getattr(configs, "adaptive_truncate", 4.0),
+            adaptive_cond_hidden   = getattr(configs, "adaptive_cond_hidden", 32),
+            adaptive_stat_window   = getattr(configs, "adaptive_stat_window", 16),  # <-- was adaptive_pool
+            adaptive_add_x_feature = getattr(configs, "adaptive_add_x_feature", True),  # <-- new
         )
+
 
         # --- Hybrid EMA + DoG (namespaced) ---
         dog_kwargs = dict(
