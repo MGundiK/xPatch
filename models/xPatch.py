@@ -39,7 +39,7 @@ class Model(nn.Module):
             gauss_truncate  = getattr(configs, "gauss_truncate", 4.0),
         )
 
-        # --- Adaptive Gaussian (CAUSAL) ---
+
         # --- Adaptive Gaussian (CAUSAL) ---
         adaptive_kwargs = dict(
             adaptive_sigmas        = getattr(configs, "adaptive_sigmas", (2.5, 4.0, 6.0, 9.0, 14.0)),
@@ -73,6 +73,15 @@ class Model(nn.Module):
             tcn_final_avg   = getattr(configs, "tcn_final_avg", 0),
         )
 
+        # --- Causal Window Smoother (namespaced) ---
+        cw_kwargs = dict(
+            cw_kind        = getattr(configs, "cw_kind", "hann"),
+            cw_L           = getattr(configs, "cw_L", 33),
+            cw_beta        = getattr(configs, "cw_beta", 8.0),
+            cw_a           = getattr(configs, "cw_a", 2),
+            cw_per_channel = getattr(configs, "cw_per_channel", False),
+        )
+
         # --- Build DECOMP ---
         self.decomp = DECOMP(
             ma_type=self.ma_type,
@@ -83,7 +92,8 @@ class Model(nn.Module):
             **adaptive_kwargs,
             **dog_kwargs,
             **lp_kwargs,
-            **tcn_kwargs
+            **tcn_kwargs,
+            **cw_kwargs
         )
 
         # Main forecaster network
