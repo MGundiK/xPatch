@@ -15,6 +15,8 @@ from layers.gaussma_adaptive_causal import AdaptiveGaussianTrendCausal  # NEW ca
 from layers.doghybrid import HybridEMA_DoG
 from layers.learnablelp import LearnableLP
 from layers.tc_smoother import TCSmoother
+from layers.causal_window import CausalWindowTrend
+
 
 
 class DECOMP(nn.Module):
@@ -70,6 +72,12 @@ class DECOMP(nn.Module):
         tcn_kernel: int = 7,
         tcn_beta: float = 0.3,
         tcn_final_avg: int = 0,
+        # ---------- Causal Window Smoother ----------
+        cw_kind: str = "hann",
+        cw_L:    int = 33,
+        cw_beta: float = 8.0,
+        cw_a:    int = 2,
+        cw_per_channel: bool = False,
     ):
         super().__init__()
         self.ma_type = ma_type.lower()
@@ -128,6 +136,14 @@ class DECOMP(nn.Module):
                 kernel=tcn_kernel,
                 beta=tcn_beta,
                 final_avg=tcn_final_avg,
+            )
+        elif self.ma_type == 'causal_window':
+            self.ma = CausalWindowTrend(
+                kind=cw_kind,
+                L=cw_L,
+                beta=cw_beta,
+                a=cw_a,
+                per_channel=cw_per_channel,
             )
 
         else:
