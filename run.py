@@ -95,6 +95,18 @@ parser.add_argument('--tcn_kernel', type=int, default=7, help='Kernel size per d
 parser.add_argument('--tcn_beta', type=float, default=0.3, help='Residual smoothing strength in TCN')
 parser.add_argument('--tcn_final_avg', type=int, default=0, help='Final average window; 0 disables')
 
+# -------- Causal Window Smoother --------
+parser.add_argument('--cw_kind', type=str, default='hann',
+                    help='Window kind: hann | kaiser | lanczos | hann_poisson')
+parser.add_argument('--cw_L', type=int, default=33,
+                    help='Full symmetric window length (use odd); causal kernel = (L+1)//2')
+parser.add_argument('--cw_beta', type=float, default=8.0,
+                    help='Kaiser beta (if cw_kind=kaiser)')
+parser.add_argument('--cw_a', type=int, default=2,
+                    help='Lanczos a (if cw_kind=lanczos)')
+parser.add_argument('--cw_per_channel', action='store_true',
+                    help='Learn a tiny gain per channel after smoothing')
+
 # optimization
 parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
 parser.add_argument('--itr', type=int, default=1, help='experiments times')
