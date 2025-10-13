@@ -107,6 +107,50 @@ parser.add_argument('--cw_a', type=int, default=2,
 parser.add_argument('--cw_per_channel', action='store_true',
                     help='Learn a tiny gain per channel after smoothing')
 
+# -------- Learnable EMA --------
+parser.add_argument('--lem_init_alpha', type=float, default=0.9)
+
+# -------- Multi-EMA --------
+parser.add_argument('--mema_K', type=int, default=3)
+parser.add_argument('--mema_init_alphas', type=str, default=None,
+    help='CSV like 0.8,0.9,0.98; if omitted, defaults will be used')
+
+# Parse to list after args.parse_known: 
+# if args.mema_init_alphas:
+#     args.mema_init_alphas = [float(x) for x in args.mema_init_alphas.split(',')]
+
+# -------- Debiased EMA --------
+parser.add_argument('--dema_alpha', type=float, default=0.9)
+parser.add_argument('--dema_learnable', action='store_true')
+
+# -------- Alpha-Beta --------
+parser.add_argument('--ab_init_alpha', type=float, default=0.5)
+parser.add_argument('--ab_init_beta', type=float, default=0.1)
+
+# -------- EWRLS --------
+parser.add_argument('--ewrls_init_lambda', type=float, default=0.98)
+parser.add_argument('--ewrls_learnable', action='store_true')
+parser.add_argument('--ewrls_init_P', type=float, default=1.0)
+
+# -------- EW-Median --------
+parser.add_argument('--ewm_step', type=float, default=0.05)
+parser.add_argument('--ewm_tau_temp', type=float, default=0.01)
+parser.add_argument('--ewm_learnable_step', action='store_true')
+
+# -------- Alpha-Cutoff --------
+parser.add_argument('--ac_fs', type=float, default=1.0)
+parser.add_argument('--ac_init_fc', type=float, default=0.05)
+parser.add_argument('--ac_learnable_fc', action='store_true')
+parser.add_argument('--ac_fc_low', type=float, default=1e-4)
+parser.add_argument('--ac_fc_high', type=float, default=0.5)
+
+# -------- One-Euro --------
+parser.add_argument('--oe_min_cutoff', type=float, default=1.0)
+parser.add_argument('--oe_beta', type=float, default=0.007)
+parser.add_argument('--oe_dcutoff', type=float, default=1.0)
+parser.add_argument('--oe_fs', type=float, default=1.0)
+
+
 # optimization
 parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
 parser.add_argument('--itr', type=int, default=1, help='experiments times')
@@ -129,6 +173,15 @@ parser.add_argument('--devices', type=str, default='0,1,2,3', help='device ids o
 parser.add_argument('--test_flop', action='store_true', help='test flops')
 
 args = parser.parse_args()
+
+# parse CSV to list
+def _parse_csv_list(s):
+    if s is None: return None
+    s = s.strip()
+    if not s: return None
+    return [float(x) for x in s.split(',')]
+args.mema_init_alphas = _parse_csv_list(args.mema_init_alphas)
+
 
 # Parse adaptive_sigmas if provided as CSV
 def _parse_float_list_csv(s):
