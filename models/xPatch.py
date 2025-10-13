@@ -82,6 +82,60 @@ class Model(nn.Module):
             cw_per_channel = getattr(configs, "cw_per_channel", False),
         )
 
+        # --- Learnable EMA ---
+        lem_kwargs = dict(
+            lem_init_alpha = getattr(configs, "lem_init_alpha", 0.9),
+        )
+        
+        # --- Multi-EMA ---
+        mema_kwargs = dict(
+            mema_K           = getattr(configs, "mema_K", 3),
+            mema_init_alphas = getattr(configs, "mema_init_alphas", None),  # list or None
+        )
+        
+        # --- Debiased EMA ---
+        dema_kwargs = dict(
+            dema_alpha     = getattr(configs, "dema_alpha", 0.9),
+            dema_learnable = getattr(configs, "dema_learnable", False),
+        )
+        
+        # --- Alpha-Beta ---
+        ab_kwargs = dict(
+            ab_init_alpha = getattr(configs, "ab_init_alpha", 0.5),
+            ab_init_beta  = getattr(configs, "ab_init_beta", 0.1),
+        )
+        
+        # --- EWRLS ---
+        ewrls_kwargs = dict(
+            ewrls_init_lambda = getattr(configs, "ewrls_init_lambda", 0.98),
+            ewrls_learnable   = getattr(configs, "ewrls_learnable", True),
+            ewrls_init_P      = getattr(configs, "ewrls_init_P", 1.0),
+        )
+        
+        # --- EW-Median ---
+        ewm_kwargs = dict(
+            ewm_step            = getattr(configs, "ewm_step", 0.05),
+            ewm_tau_temp        = getattr(configs, "ewm_tau_temp", 0.01),
+            ewm_learnable_step  = getattr(configs, "ewm_learnable_step", False),
+        )
+        
+        # --- Alpha-Cutoff ---
+        ac_kwargs = dict(
+            ac_fs           = getattr(configs, "ac_fs", 1.0),
+            ac_init_fc      = getattr(configs, "ac_init_fc", 0.05),
+            ac_learnable_fc = getattr(configs, "ac_learnable_fc", True),
+            ac_fc_low       = getattr(configs, "ac_fc_low", 1e-4),
+            ac_fc_high      = getattr(configs, "ac_fc_high", 0.5),
+        )
+        
+        # --- One-Euro ---
+        oe_kwargs = dict(
+            oe_min_cutoff = getattr(configs, "oe_min_cutoff", 1.0),
+            oe_beta       = getattr(configs, "oe_beta", 0.007),
+            oe_dcutoff    = getattr(configs, "oe_dcutoff", 1.0),
+            oe_fs         = getattr(configs, "oe_fs", 1.0),
+        )
+        
         # --- Build DECOMP ---
         self.decomp = DECOMP(
             ma_type=self.ma_type,
@@ -93,8 +147,17 @@ class Model(nn.Module):
             **dog_kwargs,
             **lp_kwargs,
             **tcn_kwargs,
-            **cw_kwargs
+            **cw_kwargs,       # you already added earlier
+            **lem_kwargs,
+            **mema_kwargs,
+            **dema_kwargs,
+            **ab_kwargs,
+            **ewrls_kwargs,
+            **ewm_kwargs,
+            **ac_kwargs,
+            **oe_kwargs,
         )
+
 
         # Main forecaster network
         self.net = Network(seq_len, pred_len, patch_len, stride, padding_patch)
