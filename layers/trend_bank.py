@@ -102,45 +102,84 @@ class CausalFIRWindow(nn.Module):
         return y.transpose(1,2)  # [B,T,C]
 
 
+
+
 class KaiserFIR(CausalFIRWindow):
     """
     Learnable-β Kaiser window FIR (causal), optionally multi-kernel.
+
+    Args
+    ----
+    channels : int
+    L : int = 129
+        Full causal kernel length (conv will left-pad by L-1).
+    num_kernels : int = 1
+        If >1, you can average or learn a convex mixture across kernels.
+    init_beta : float = 6.0
+        Initial Kaiser β. Larger → narrower main lobe / lower sidelobes.
+    learnable_mix : bool = False
+        If True and num_kernels > 1, learn per-channel softmax mixing.
     """
     def __init__(self, channels, L=129, num_kernels=1, init_beta=6.0, learnable_mix=False):
         super().__init__(channels, L, num_kernels, learnable_mix)
         # β per (K,C)
-        self.log_beta = nn.Parameter(torch.log(torch.full((num_kernels, channels), init_beta)))
+        self.log_beta = nn.Parameter(
+            torch.log(torch.full((num_kernels, channels), float(init_beta)))
+        )
 
     def window(self, theta=None):
         # indices 0..L-1 (causal)
         n = torch.arange(self.L, device=self.log_beta.device, dtype=torch.float32)
-        # center at (L-1) to make symmetric weights in causal form
-        m = (n - (self.L-1)/2) / ((self.L-1)/2 + 1e-8)  # [-1,1]
-        beta = torch.exp(self.log_beta)                 # [K,C]
-        # I0 approx (Bessel) using torch.i0 if available
-        i0_beta = torch.i0(beta)
-        arg = beta.unsqueeze(-1) * torch.sqrt(1 - m.pow(2)).clamp_min(0)  # [K,C,L]
-        w = torch.i0(arg) / i0_beta.unsqueeze(-1)                          # [K,C,L]
-        # zero out future (right) weights to keep causality? We already causal-pad on left
-        # The symmetric window is applied as left-only by padding, so it's causal.
+        # map to [-1, 1] with center at (L-1)/2 so Kaiser is symmetric pre-causalization
+        m = (n - (self.L - 1) / 2) / ((self.L - 1) / 2 + 1e-8)  # [L]
+        beta = torch.exp(self.log_beta)                          # [K,C]
+        i0_beta = torch.i0(beta)                                 # [K,C]
+        # classic Kaiser: I0(β * sqrt(1 - m^2)) / I0(β)
+        arg = beta.unsqueeze(-1) * torch.sqrt(torch.clamp(1 - m.pow(2), min=0))  # [K,C,L]
+        w = torch.i0(arg) / (i0_beta.unsqueeze(-1) + 1e-12)                       # [K,C,L]
         return w
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # Build normalized depthwise kernel(s) and apply causal FIR
+        K = self.build_kernel(theta=None, x=x)     # [C*K, 1, L]
+        return self.forward_with_kernel(x, K)      # [B,T,C]
+
 
 class HannPoissonFIR(CausalFIRWindow):
     """
     Hann window multiplied by decaying Poisson exp(-λ n), learnable λ.
+
+    Args
+    ----
+    channels : int
+    L : int = 129
+        Full causal kernel length (conv will left-pad by L-1).
+    num_kernels : int = 1
+        If >1, you can average or learn a convex mixture across kernels.
+    init_lambda : float = 0.02
+        Initial decay rate λ for the Poisson envelope (per-kernel, per-channel).
+    learnable_mix : bool = False
+        If True and num_kernels > 1, learn per-channel softmax mixing.
     """
     def __init__(self, channels, L=129, num_kernels=1, init_lambda=0.02, learnable_mix=False):
         super().__init__(channels, L, num_kernels, learnable_mix)
-        self.log_lambda = nn.Parameter(torch.log(torch.full((num_kernels, channels), init_lambda)))
+        self.log_lambda = nn.Parameter(
+            torch.log(torch.full((num_kernels, channels), float(init_lambda)))
+        )
 
     def window(self, theta=None):
-        n = torch.arange(self.L, device=self.log_lambda.device, dtype=torch.float32)
-        # Hann in [0..L-1] (causalized by left padding)
-        hann = 0.5 * (1 - torch.cos(2*torch.pi*(n / (self.L-1)).clamp(0,1)))  # [L]
-        lam = torch.exp(self.log_lambda)                                       # [K,C]
-        pois = torch.exp(-lam.unsqueeze(-1) * n.view(1,1,self.L))             # [K,C,L]
-        w = pois * hann.view(1,1,self.L)
+        n = torch.arange(self.L, device=self.log_lambda.device, dtype=torch.float32)  # [L]
+        # Hann over [0..L-1]; causality is handled by left padding in conv
+        hann = 0.5 * (1 - torch.cos(2 * torch.pi * (n / (self.L - 1)).clamp(0, 1)))  # [L]
+        lam = torch.exp(self.log_lambda)                                             # [K,C]
+        pois = torch.exp(-lam.unsqueeze(-1) * n.view(1, 1, self.L))                  # [K,C,L]
+        w = pois * hann.view(1, 1, self.L)                                          # [K,C,L]
         return w
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        K = self.build_kernel(theta=None, x=x)     # [C*K, 1, L]
+        return self.forward_with_kernel(x, K)      # [B,T,C]
+
 
 
 
@@ -149,41 +188,53 @@ class HannPoissonFIR(CausalFIRWindow):
 # ============================================================
 
 class FastLearnableEMA(nn.Module):
-    def __init__(self, channels, init_alpha=0.9, debias=False, clamp=(1e-4, 1-1e-4)):
+    """
+    Exact EMA via cumulative trick:
+      y_t = (1-α) * α^t * sum_{k=0..t} (α^-k) * x_k
+    With bias correction to enforce y_0 = x_0 (like the common EMA init).
+    Options:
+      - shared: if True, use a single α for all channels (paper parity)
+      - debias: divide by (1 - α^t) so early steps aren’t damped
+    """
+    def __init__(self, channels, init_alpha=0.3, debias=True, shared=False, clamp=(1e-4, 1-1e-4)):
         super().__init__()
         self.debias = debias
+        self.shared = shared
         self.clamp = clamp
         init = torch.logit(torch.tensor(init_alpha).clamp(*clamp))
-        self.logit_alpha = nn.Parameter(init.repeat(channels))  # [C]
+        if shared:
+            self.logit_alpha = nn.Parameter(init)              # scalar α
+        else:
+            self.logit_alpha = nn.Parameter(init.repeat(channels))  # per-channel α
 
     def forward(self, x):
-        # x: [B,T,C]
+        # x: [B,T,C] -> y: [B,T,C]
         B, T, C = x.shape
         device, dtype = x.device, x.dtype
 
-        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(device, dtype)  # [C]
-        t = torch.arange(T, device=device, dtype=dtype).unsqueeze(1)              # [T,1]
+        # α in (0,1)
+        if self.shared:
+            a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(device, dtype)  # []
+            a_c = a.view(1)                                                           # [1]
+        else:
+            a_c = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(device, dtype)  # [C]
 
-        # a_pow[t,c] = a[c]^t
-        a_pow = torch.pow(a.unsqueeze(0), t)                                      # [T,C]
-        divisor = a_pow.clamp_min(1e-8)                                           # [T,C]
+        # Build α^t and α^{-t} stably
+        t = torch.arange(T, device=device, dtype=dtype)              # [T]
+        # use exp(log(α)*t) to avoid pow underflow/overflow
+        loga = torch.log(a_c)                                        # [C] or [1]
+        a_pow_t = torch.exp(t.view(T,1) * loga.view(1,-1))           # [T,C]
+        a_pow_neg_t = torch.exp(-t.view(T,1) * loga.view(1,-1))      # [T,C]
 
-        # weights[t,c] = (1-a[c]) * a[c]^t  for t>=1, and = a[c]^0 (=1) for t=0
-        # build a scale without in-place
-        scale = torch.cat([
-            torch.ones(1, C, device=device, dtype=dtype),
-            (1.0 - a).unsqueeze(0).expand(T-1, C)
-        ], dim=0)                                                                 # [T,C]
-        weights = a_pow * scale                                                   # [T,C]
-
-        w = weights.view(1, T, C)
-        d = divisor.view(1, T, C)
-
-        y = torch.cumsum(x * w, dim=1) / d                                        # [B,T,C]
+        # y_t = (1-α) * α^t * cumsum( α^{-k} * x_k )_t
+        x_scaled = x * a_pow_neg_t.view(1,T,C)                       # [B,T,C]
+        prefix = torch.cumsum(x_scaled, dim=1)                        # [B,T,C]
+        y = (1.0 - a_c.view(1,1,-1)) * a_pow_t.view(1,T,C) * prefix   # [B,T,C]
 
         if self.debias:
-            deb = (1.0 - a_pow).clamp_min(1e-8).view(1, T, C)
-            y = y / deb
+            # divide by (1 - α^t) -> y_0 = x_0; matches common EMA init
+            denom = (1.0 - a_pow_t).clamp_min(1e-8).view(1,T,C)      # [1,T,C]
+            y = y / denom
 
         return y
 
