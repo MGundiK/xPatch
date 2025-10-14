@@ -150,6 +150,36 @@ parser.add_argument('--oe_beta', type=float, default=0.007)
 parser.add_argument('--oe_dcutoff', type=float, default=1.0)
 parser.add_argument('--oe_fs', type=float, default=1.0)
 
+# run.py (append near other args)
+
+# ---- FastLearnableEMA ----
+parser.add_argument('--fastema_init_alpha', type=float, default=0.9, help='Fast EMA init alpha per channel')
+parser.add_argument('--fastema_debias', action='store_true', help='Enable EMA bias correction')
+
+# ---- Alpha-Beta filter ----
+parser.add_argument('--ab_init_alpha', type=float, default=0.5, help='Alpha-Beta: init alpha')
+parser.add_argument('--ab_init_beta',  type=float, default=0.1, help='Alpha-Beta: init beta')
+
+# ---- Kaiser FIR ----
+parser.add_argument('--kaiser_L', type=int, default=129, help='Kaiser FIR: kernel length (odd)')
+parser.add_argument('--kaiser_num_kernels', type=int, default=1, help='Kaiser FIR: #kernels to mix')
+parser.add_argument('--kaiser_init_beta', type=float, default=6.0, help='Kaiser FIR: init beta')
+parser.add_argument('--kaiser_learnable_mix', action='store_true', help='Kaiser FIR: learn soft mixture across kernels')
+
+# ---- Hann-Poisson FIR ----
+parser.add_argument('--hannp_L', type=int, default=129, help='Hann-Poisson FIR: kernel length (odd)')
+parser.add_argument('--hannp_num_kernels', type=int, default=1, help='#kernels to mix')
+parser.add_argument('--hannp_init_lambda', type=float, default=0.02, help='Hann-Poisson: init lambda')
+parser.add_argument('--hannp_learnable_mix', action='store_true', help='Hann-Poisson: learn soft mixture')
+
+# ---- Fast EWRLS Level ----
+parser.add_argument('--ewrls_init_lambda', type=float, default=0.98, help='EWRLS: init forgetting lambda')
+
+# ---- Huber EMA ----
+parser.add_argument('--huber_init_alpha', type=float, default=0.9, help='Huber EMA: init alpha')
+parser.add_argument('--huber_delta', type=float, default=1.0, help='Huber EMA: Huber delta')
+
+
 
 # optimization
 parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
