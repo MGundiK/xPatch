@@ -187,40 +187,50 @@ class HannPoissonFIR(CausalFIRWindow):
 # 1) Learnable EMA (α per channel)
 # ============================================================
 
+import torch
+from torch import nn
+
 class FastLearnableEMA(nn.Module):
     """
-    Stable per-channel EMA:
-      y_t = a ⊙ y_{t-1} + (1-a) ⊙ x_t
-    Optional bias correction: y_hat_t = y_t / (1 - a^t).
-    x, y: [B, T, C]
+    EMA with learnable per-channel α, stable autograd (no in-place slicing).
+    x: [B,T,C] -> trend: [B,T,C]
     """
     def __init__(self, channels, init_alpha=0.9, debias=False, clamp=(1e-4, 1-1e-4)):
         super().__init__()
-        self.debias = bool(debias)
+        self.debias = debias
         self.clamp = clamp
         init = torch.logit(torch.tensor(init_alpha).clamp(*clamp))
         self.logit_alpha = nn.Parameter(init.repeat(channels))  # [C]
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # shapes
         B, T, C = x.shape
-        # a in (0,1), broadcast to [1,1,C]
-        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(x.device, x.dtype).view(1,1,C)
-        one_minus_a = (1.0 - a)
+        # α per channel, broadcast to [B,1,C]
+        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(x.device, x.dtype)
+        a = a.view(1, 1, C)  # [1,1,C]
 
-        y = torch.zeros_like(x)
-        y[:, 0, :] = x[:, 0, :]  # common warm start used in xPatch-style EMA
+        # time scan without in-place writes into a preallocated tensor
+        y0 = x[:, 0, :].unsqueeze(1)          # [B,1,C]
+        outs = [y0]                            # list of [B,1,C]
 
-        # stable recurrent update
+        one_minus_a = (1.0 - a)                # [1,1,C]
         for t in range(1, T):
-            y[:, t, :] = a * y[:, t-1, :] + one_minus_a * x[:, t, :]
+            prev = outs[-1]                    # [B,1,C]
+            xt   = x[:, t, :].unsqueeze(1)     # [B,1,C]
+            yt   = a * prev + one_minus_a * xt # [B,1,C] (pure out-of-place ops)
+            outs.append(yt)
+
+        y = torch.cat(outs, dim=1)             # [B,T,C]
 
         if self.debias:
-            # bias-correction (safe, no in-place ops)
+            # bias-correction: y_hat_t = y_t / (1 - a^t)
             t_idx = torch.arange(1, T+1, device=x.device, dtype=x.dtype).view(1, T, 1)  # [1,T,1]
-            denom = (1.0 - torch.pow(a, t_idx)).clamp_min(1e-6)                         # [1,T,1]
+            a_pow = torch.pow(a, t_idx)                                                 # [1,T,C]
+            denom = (1.0 - a_pow).clamp_min(1e-8)
             y = y / denom
 
         return y
+
 
 
 # ============================================================
