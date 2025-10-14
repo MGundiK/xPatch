@@ -189,51 +189,35 @@ class HannPoissonFIR(CausalFIRWindow):
 
 class FastLearnableEMA(nn.Module):
     """
-    Exact EMA via cumulative trick:
-      y_t = (1-α) * α^t * sum_{k=0..t} (α^-k) * x_k
-    With bias correction to enforce y_0 = x_0 (like the common EMA init).
-    Options:
-      - shared: if True, use a single α for all channels (paper parity)
-      - debias: divide by (1 - α^t) so early steps aren’t damped
+    Stable per-channel EMA:
+      y_t = a ⊙ y_{t-1} + (1-a) ⊙ x_t
+    Optional bias correction: y_hat_t = y_t / (1 - a^t).
+    x, y: [B, T, C]
     """
-    def __init__(self, channels, init_alpha=0.3, debias=True, shared=False, clamp=(1e-4, 1-1e-4)):
+    def __init__(self, channels, init_alpha=0.9, debias=False, clamp=(1e-4, 1-1e-4)):
         super().__init__()
-        self.debias = debias
-        self.shared = shared
+        self.debias = bool(debias)
         self.clamp = clamp
         init = torch.logit(torch.tensor(init_alpha).clamp(*clamp))
-        if shared:
-            self.logit_alpha = nn.Parameter(init)              # scalar α
-        else:
-            self.logit_alpha = nn.Parameter(init.repeat(channels))  # per-channel α
+        self.logit_alpha = nn.Parameter(init.repeat(channels))  # [C]
 
-    def forward(self, x):
-        # x: [B,T,C] -> y: [B,T,C]
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         B, T, C = x.shape
-        device, dtype = x.device, x.dtype
+        # a in (0,1), broadcast to [1,1,C]
+        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(x.device, x.dtype).view(1,1,C)
+        one_minus_a = (1.0 - a)
 
-        # α in (0,1)
-        if self.shared:
-            a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(device, dtype)  # []
-            a_c = a.view(1)                                                           # [1]
-        else:
-            a_c = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(device, dtype)  # [C]
+        y = torch.zeros_like(x)
+        y[:, 0, :] = x[:, 0, :]  # common warm start used in xPatch-style EMA
 
-        # Build α^t and α^{-t} stably
-        t = torch.arange(T, device=device, dtype=dtype)              # [T]
-        # use exp(log(α)*t) to avoid pow underflow/overflow
-        loga = torch.log(a_c)                                        # [C] or [1]
-        a_pow_t = torch.exp(t.view(T,1) * loga.view(1,-1))           # [T,C]
-        a_pow_neg_t = torch.exp(-t.view(T,1) * loga.view(1,-1))      # [T,C]
-
-        # y_t = (1-α) * α^t * cumsum( α^{-k} * x_k )_t
-        x_scaled = x * a_pow_neg_t.view(1,T,C)                       # [B,T,C]
-        prefix = torch.cumsum(x_scaled, dim=1)                        # [B,T,C]
-        y = (1.0 - a_c.view(1,1,-1)) * a_pow_t.view(1,T,C) * prefix   # [B,T,C]
+        # stable recurrent update
+        for t in range(1, T):
+            y[:, t, :] = a * y[:, t-1, :] + one_minus_a * x[:, t, :]
 
         if self.debias:
-            # divide by (1 - α^t) -> y_0 = x_0; matches common EMA init
-            denom = (1.0 - a_pow_t).clamp_min(1e-8).view(1,T,C)      # [1,T,C]
+            # bias-correction (safe, no in-place ops)
+            t_idx = torch.arange(1, T+1, device=x.device, dtype=x.dtype).view(1, T, 1)  # [1,T,1]
+            denom = (1.0 - torch.pow(a, t_idx)).clamp_min(1e-6)                         # [1,T,1]
             y = y / denom
 
         return y
@@ -492,6 +476,7 @@ class OneEuro(nn.Module):
 # If you didn’t split them yet, you can keep them in one file and import here accordingly.
 
 
+
 def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
     """
     name ∈ {
@@ -502,24 +487,29 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
     """
     n = name.lower()
 
+    # -------- Fast learnable EMA (stable recurrent; debias OFF by default) --------
     if n == "fast_ema":
-        # kwargs: fastema_init_alpha=0.9, fastema_debias=False
         return FastLearnableEMA(
             channels=channels,
             init_alpha=kw.get("fastema_init_alpha", 0.9),
-            debias=kw.get("fastema_debias", False),
+            debias=kw.get("fastema_debias", False),   # default False (paper EMA style)
         )
 
+    # -------- Alpha–Beta (optionally compiled) --------
     if n == "alpha_beta":
-        # kwargs: ab_init_alpha=0.5, ab_init_beta=0.1
-        return AlphaBetaFilter(
+        mod = AlphaBetaFilter(
             channels=channels,
             init_alpha=kw.get("ab_init_alpha", 0.5),
             init_beta=kw.get("ab_init_beta", 0.1),
         )
+        try:
+            mod = torch.compile(mod)
+        except Exception:
+            pass
+        return mod
 
+    # -------- Kaiser FIR --------
     if n == "kaiser_fir":
-        # kwargs: kaiser_L=129, kaiser_num_kernels=1, kaiser_init_beta=6.0, kaiser_learnable_mix=False
         return KaiserFIR(
             channels=channels,
             L=kw.get("kaiser_L", 129),
@@ -528,8 +518,8 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
             learnable_mix=kw.get("kaiser_learnable_mix", False),
         )
 
+    # -------- Hann–Poisson FIR --------
     if n == "hann_poisson_fir":
-        # kwargs: hannp_L=129, hannp_num_kernels=1, hannp_init_lambda=0.02, hannp_learnable_mix=False
         return HannPoissonFIR(
             channels=channels,
             L=kw.get("hannp_L", 129),
@@ -538,19 +528,29 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
             learnable_mix=kw.get("hannp_learnable_mix", False),
         )
 
+    # -------- EW-RLS (optionally compiled) --------
     if n == "ewrls_fast":
-        # kwargs: ewrls_init_lambda=0.98
-        return FastEWRLSLevel(
+        mod = FastEWRLSLevel(
             channels=channels,
             init_lambda=kw.get("ewrls_init_lambda", 0.98),
         )
+        try:
+            mod = torch.compile(mod)
+        except Exception:
+            pass
+        return mod
 
+    # -------- Robust Huber-EMA (optionally compiled) --------
     if n == "huber_ema":
-        # kwargs: huber_init_alpha=0.9, huber_delta=1.0
-        return HuberEMA(
+        mod = HuberEMA(
             channels=channels,
             init_alpha=kw.get("huber_init_alpha", 0.9),
             delta=kw.get("huber_delta", 1.0),
         )
+        try:
+            mod = torch.compile(mod)
+        except Exception:
+            pass
+        return mod
 
     raise ValueError(f"Unknown trend module: {name}")
