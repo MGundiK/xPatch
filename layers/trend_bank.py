@@ -149,10 +149,6 @@ class HannPoissonFIR(CausalFIRWindow):
 # ============================================================
 
 class FastLearnableEMA(nn.Module):
-    """
-    EMA with learnable per-channel α, vectorized via geometric series.
-    x: [B,T,C] -> trend: [B,T,C]
-    """
     def __init__(self, channels, init_alpha=0.9, debias=False, clamp=(1e-4, 1-1e-4)):
         super().__init__()
         self.debias = debias
@@ -161,25 +157,36 @@ class FastLearnableEMA(nn.Module):
         self.logit_alpha = nn.Parameter(init.repeat(channels))  # [C]
 
     def forward(self, x):
-        B,T,C = x.shape
-        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(x.device).to(x.dtype)  # [C]
-        # weights over time per channel: w_k = (1-a)*a^(k) (geometric)
-        # We compute cumulative sum trick like xPatch’s EMA fast path but with per-channel α.
-        t_idx = torch.arange(T, device=x.device, dtype=x.dtype)  # [T]
-        # [T,C]: a^t and divisor
-        a_pow = torch.pow(a.view(1,C), t_idx.view(T,1))          # [T,C]
-        divisor = a_pow.clone()
-        weights = a_pow.clone()
-        weights[1:,:] = weights[1:,:] * (1 - a.view(1,C))        # multiply by (1-a) for k>=1
-        # reshape to broadcast with [B,T,C]
-        w = weights.view(1,T,C)
-        d = divisor.view(1,T,C).clamp_min(1e-8)
-        y = torch.cumsum(x * w, dim=1) / d                       # [B,T,C]
+        # x: [B,T,C]
+        B, T, C = x.shape
+        device, dtype = x.device, x.dtype
+
+        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(device, dtype)  # [C]
+        t = torch.arange(T, device=device, dtype=dtype).unsqueeze(1)              # [T,1]
+
+        # a_pow[t,c] = a[c]^t
+        a_pow = torch.pow(a.unsqueeze(0), t)                                      # [T,C]
+        divisor = a_pow.clamp_min(1e-8)                                           # [T,C]
+
+        # weights[t,c] = (1-a[c]) * a[c]^t  for t>=1, and = a[c]^0 (=1) for t=0
+        # build a scale without in-place
+        scale = torch.cat([
+            torch.ones(1, C, device=device, dtype=dtype),
+            (1.0 - a).unsqueeze(0).expand(T-1, C)
+        ], dim=0)                                                                 # [T,C]
+        weights = a_pow * scale                                                   # [T,C]
+
+        w = weights.view(1, T, C)
+        d = divisor.view(1, T, C)
+
+        y = torch.cumsum(x * w, dim=1) / d                                        # [B,T,C]
+
         if self.debias:
-            # bias correction: divide by (1 - a^t)
-            denom = (1 - a_pow).clamp_min(1e-8).view(1,T,C)
-            y = y / denom
+            deb = (1.0 - a_pow).clamp_min(1e-8).view(1, T, C)
+            y = y / deb
+
         return y
+
 
 # ============================================================
 # 2) Multi-α EMA mixture (K time constants + learned mixing)
