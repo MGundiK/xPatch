@@ -123,10 +123,6 @@ parser.add_argument('--mema_init_alphas', type=str, default=None,
 parser.add_argument('--dema_alpha', type=float, default=0.9)
 parser.add_argument('--dema_learnable', action='store_true')
 
-# -------- Alpha-Beta --------
-parser.add_argument('--ab_init_alpha', type=float, default=0.5)
-parser.add_argument('--ab_init_beta', type=float, default=0.1)
-
 # -------- EWRLS --------
 parser.add_argument('--ewrls_init_lambda', type=float, default=0.98)
 parser.add_argument('--ewrls_learnable', action='store_true')
