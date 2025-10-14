@@ -123,8 +123,8 @@ parser.add_argument('--mema_init_alphas', type=str, default=None,
 parser.add_argument('--dema_alpha', type=float, default=0.9)
 parser.add_argument('--dema_learnable', action='store_true')
 
-# -------- EWRLS --------
-parser.add_argument('--ewrls_init_lambda', type=float, default=0.98)
+# -------- EWRLS Fast EWRLS Level--------
+parser.add_argument('--ewrls_init_lambda', type=float, default=0.98, help='EWRLS: init forgetting lambda')
 parser.add_argument('--ewrls_learnable', action='store_true')
 parser.add_argument('--ewrls_init_P', type=float, default=1.0)
 
@@ -167,9 +167,6 @@ parser.add_argument('--hannp_L', type=int, default=129, help='Hann-Poisson FIR: 
 parser.add_argument('--hannp_num_kernels', type=int, default=1, help='#kernels to mix')
 parser.add_argument('--hannp_init_lambda', type=float, default=0.02, help='Hann-Poisson: init lambda')
 parser.add_argument('--hannp_learnable_mix', action='store_true', help='Hann-Poisson: learn soft mixture')
-
-# ---- Fast EWRLS Level ----
-parser.add_argument('--ewrls_init_lambda', type=float, default=0.98, help='EWRLS: init forgetting lambda')
 
 # ---- Huber EMA ----
 parser.add_argument('--huber_init_alpha', type=float, default=0.9, help='Huber EMA: init alpha')
