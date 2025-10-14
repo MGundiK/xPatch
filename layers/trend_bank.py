@@ -449,7 +449,7 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
             init_beta=kw.get("ab_init_beta", 0.1),
         )
         try:
-        mod = torch.compile(mod)
+            mod = torch.compile(mod)
         except Exception:
             pass
         return mod
@@ -481,7 +481,7 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
             init_lambda=kw.get("ewrls_init_lambda", 0.98),
         )
         try:
-        mod = torch.compile(mod)
+            mod = torch.compile(mod)
         except Exception:
             pass
         return mod
@@ -494,7 +494,7 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
             delta=kw.get("huber_delta", 1.0),
         )
         try:
-        mod = torch.compile(mod)
+            mod = torch.compile(mod)
         except Exception:
             pass
         return mod
