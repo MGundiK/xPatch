@@ -313,70 +313,76 @@ class DebiasedEMA(nn.Module):
 
 class AlphaBetaFilter(nn.Module):
     """
-    2-state causal filter: level + slope, learnable α, β (per channel).
-    x: [B,T,C] -> trend(level): [B,T,C]
+    Causal 2-state filter (level+slope) with learnable per-channel α, β.
+    Input/Output: x, trend ∈ ℝ^{B×T×C}
     """
-    def __init__(self, channels, init_alpha=0.5, init_beta=0.1, clamp=(1e-4, 1-1e-4)):
+    def __init__(self, channels: int, init_alpha: float = 0.5, init_beta: float = 0.1,
+                 clamp=(1e-4, 1 - 1e-4)):
         super().__init__()
-        self.logit_a = nn.Parameter(torch.logit(torch.tensor(init_alpha)).repeat(channels))
-        self.logit_b = nn.Parameter(torch.logit(torch.tensor(init_beta )).repeat(channels))
-        self.clamp   = clamp
+        a0 = torch.logit(torch.tensor(init_alpha).clamp(*clamp))
+        b0 = torch.logit(torch.tensor(init_beta ).clamp(*clamp))
+        self.logit_a = nn.Parameter(a0.repeat(channels))  # [C]
+        self.logit_b = nn.Parameter(b0.repeat(channels))  # [C]
+        self.clamp = clamp
 
-    def forward(self, x):
-        B,T,C = x.shape
-        a = torch.sigmoid(self.logit_a).clamp(*self.clamp).to(x.device).to(x.dtype).view(1,1,C)
-        b = torch.sigmoid(self.logit_b).clamp(*self.clamp).to(x.device).to(x.dtype).view(1,1,C)
-        L = torch.zeros_like(x); L[:,0,:] = x[:,0,:]  # level
-        V = torch.zeros(B,C, device=x.device, dtype=x.dtype)  # slope
-        for t in range(1,T):
-            pred  = L[:,t-1,:] + V
-            resid = x[:,t,:] - pred
-            L[:,t,:] = pred + a.squeeze(0).squeeze(0) * resid
-            V = V + b.squeeze(0).squeeze(0) * (L[:,t,:] - L[:,t-1,:] - V)
-        return L
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.shape
+        a = torch.sigmoid(self.logit_a).clamp(*self.clamp).to(x.device, x.dtype)  # [C]
+        b = torch.sigmoid(self.logit_b).clamp(*self.clamp).to(x.device, x.dtype)  # [C]
 
-# Speed tip: compile
-try:
-    AlphaBetaFilter = torch.compile(AlphaBetaFilter)  # PyTorch 2.3+
-except Exception:
-    pass
+        # Initialize level L0 = x0, slope V0 = 0
+        L_prev = x[:, 0, :]                              # [B,C]
+        V_prev = torch.zeros(B, C, device=x.device, dtype=x.dtype)
+        outs = [L_prev.unsqueeze(1)]                     # list of [B,1,C]
+
+        # Unroll causally without in-place writes onto a single tensor
+        for t in range(1, T):
+            pred  = L_prev + V_prev                      # [B,C]
+            resid = x[:, t, :] - pred                    # [B,C]
+            L_t   = pred + a * resid                     # [B,C]
+            V_t   = V_prev + b * (L_t - L_prev - V_prev) # [B,C]
+            outs.append(L_t.unsqueeze(1))
+            L_prev, V_prev = L_t, V_t
+
+        return torch.cat(outs, dim=1)                    # [B,T,C]
 
 
 # ============================================================
 # 5) EWRLS Level (online RLS with forgetting)
 # ============================================================
 
+
 class FastEWRLSLevel(nn.Module):
     """
-    Level-only EW-RLS with forgetting λ (learnable per channel).
-    x: [B,T,C] -> trend: [B,T,C]
+    Level-only exponentially weighted RLS with learnable per-channel λ.
+    Input/Output: x, trend ∈ ℝ^{B×T×C}
     """
-    def __init__(self, channels, init_lambda=0.98, clamp=(1e-4, 1-1e-4)):
+    def __init__(self, channels: int, init_lambda: float = 0.98,
+                 clamp=(1e-4, 1 - 1e-4), init_P: float = 1.0):
         super().__init__()
-        self.logit_lambda = nn.Parameter(torch.logit(torch.tensor(init_lambda)).repeat(channels))
+        l0 = torch.logit(torch.tensor(init_lambda).clamp(*clamp))
+        self.logit_lambda = nn.Parameter(l0.repeat(channels))  # [C]
         self.clamp = clamp
-        self.init_P = 1.0
+        self.init_P = float(init_P)
 
-    def forward(self, x):
-        B,T,C = x.shape
-        lam = torch.sigmoid(self.logit_lambda).clamp(*self.clamp).to(x.device).to(x.dtype)  # [C]
-        lam = lam.view(1,C)
-        theta = x[:,0,:].clone()                         # [B,C]
-        P     = torch.full((B,C), self.init_P, device=x.device, dtype=x.dtype)
-        out   = torch.zeros_like(x); out[:,0,:] = theta
-        for t in range(1,T):
-            e  = x[:,t,:] - theta                        # [B,C]
-            denom = lam + P                              # [B,C]
-            K  = P / denom
-            theta = theta + K * e
-            P = (P - K * P) / lam
-            out[:,t,:] = theta
-        return out
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.shape
+        lam = torch.sigmoid(self.logit_lambda).clamp(*self.clamp).to(x.device, x.dtype)  # [C]
 
-try:
-    FastEWRLSLevel = torch.compile(FastEWRLSLevel)
-except Exception:
-    pass
+        theta = x[:, 0, :].clone()                               # [B,C]
+        P     = torch.full((B, C), self.init_P, device=x.device, dtype=x.dtype)  # [B,C]
+        outs  = [theta.unsqueeze(1)]                              # [B,1,C]
+
+        # Causal update; scalar regressor (constant “1”) -> level tracking
+        for t in range(1, T):
+            e   = x[:, t, :] - theta            # innovation  [B,C]
+            den = lam + P                        # [B,C]
+            K   = P / den                        # gain       [B,C]
+            theta = theta + K * e                # posterior  [B,C]
+            P = (P - K * P) / lam                # cov update [B,C]
+            outs.append(theta.unsqueeze(1))
+
+        return torch.cat(outs, dim=1)            # [B,T,C]
 
 
 # ============================================================
@@ -385,30 +391,35 @@ except Exception:
 
 class HuberEMA(nn.Module):
     """
-    Robust EMA: replace residual with Huber loss derivative.
+    Robust EMA: EMA update driven by Huber pseudo-gradient of residual.
+    Learnable per-channel α ∈ (0,1). δ is kept as a (non-trainable) buffer.
+    Input/Output: x, trend ∈ ℝ^{B×T×C}
     """
-    def __init__(self, channels, init_alpha=0.9, delta=1.0, clamp=(1e-4,1-1e-4)):
+    def __init__(self, channels: int, init_alpha: float = 0.9, delta: float = 1.0,
+                 clamp=(1e-4, 1 - 1e-4)):
         super().__init__()
-        self.logit_alpha = nn.Parameter(torch.logit(torch.tensor(init_alpha)).repeat(channels))
-        self.delta = nn.Parameter(torch.tensor(delta), requires_grad=False)
+        a0 = torch.logit(torch.tensor(init_alpha).clamp(*clamp))
+        self.logit_alpha = nn.Parameter(a0.repeat(channels))  # [C]
         self.clamp = clamp
+        self.register_buffer("delta", torch.tensor(float(delta)), persistent=False)
 
-    def forward(self, x):
-        B,T,C = x.shape
-        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(x.device).to(x.dtype).view(1,1,C)
-        y = torch.zeros_like(x); y[:,0,:] = x[:,0,:]
-        d = self.delta.to(x.device).to(x.dtype)
-        for t in range(1,T):
-            r = x[:,t,:] - y[:,t-1,:]
-            g = torch.where(r.abs() <= d, r, d * r.sign())  # Huber grad
-            y[:,t,:] = y[:,t-1,:] + (1 - a) * g
-        return y
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        B, T, C = x.shape
+        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(x.device, x.dtype)  # [C]
+        d = self.delta.to(x.device, x.dtype)
 
-try:
-    HuberEMA = torch.compile(HuberEMA)
-except Exception:
-    pass
+        y_prev = x[:, 0, :]                           # [B,C]
+        outs = [y_prev.unsqueeze(1)]
 
+        for t in range(1, T):
+            r = x[:, t, :] - y_prev                   # residual [B,C]
+            # Huber gradient (piecewise linear)
+            g = torch.where(r.abs() <= d, r, d * r.sign())
+            y_t = y_prev + (1 - a) * g
+            outs.append(y_t.unsqueeze(1))
+            y_prev = y_t
+
+        return torch.cat(outs, dim=1)                 # [B,T,C]
 
 # ============================================================
 # 7) Alpha Cutoff Filter (first-order IIR from cutoff)
@@ -492,7 +503,7 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
     n = name.lower()
 
     if n == "fast_ema":
-        # kwargs: init_alpha=0.9, debias=False
+        # kwargs: fastema_init_alpha=0.9, fastema_debias=False
         return FastLearnableEMA(
             channels=channels,
             init_alpha=kw.get("fastema_init_alpha", 0.9),
@@ -500,20 +511,15 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
         )
 
     if n == "alpha_beta":
-        # kwargs: init_alpha=0.5, init_beta=0.1
-        mod = AlphaBetaFilter(
+        # kwargs: ab_init_alpha=0.5, ab_init_beta=0.1
+        return AlphaBetaFilter(
             channels=channels,
             init_alpha=kw.get("ab_init_alpha", 0.5),
             init_beta=kw.get("ab_init_beta", 0.1),
         )
-        try:
-            mod = torch.compile(mod)
-        except Exception:
-            pass
-        return mod
 
     if n == "kaiser_fir":
-        # kwargs: L=129, num_kernels=1, init_beta=6.0, learnable_mix=False
+        # kwargs: kaiser_L=129, kaiser_num_kernels=1, kaiser_init_beta=6.0, kaiser_learnable_mix=False
         return KaiserFIR(
             channels=channels,
             L=kw.get("kaiser_L", 129),
@@ -523,7 +529,7 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
         )
 
     if n == "hann_poisson_fir":
-        # kwargs: L=129, num_kernels=1, init_lambda=0.02, learnable_mix=False
+        # kwargs: hannp_L=129, hannp_num_kernels=1, hannp_init_lambda=0.02, hannp_learnable_mix=False
         return HannPoissonFIR(
             channels=channels,
             L=kw.get("hannp_L", 129),
@@ -533,28 +539,18 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
         )
 
     if n == "ewrls_fast":
-        # kwargs: init_lambda=0.98
-        mod = FastEWRLSLevel(
+        # kwargs: ewrls_init_lambda=0.98
+        return FastEWRLSLevel(
             channels=channels,
             init_lambda=kw.get("ewrls_init_lambda", 0.98),
         )
-        try:
-            mod = torch.compile(mod)
-        except Exception:
-            pass
-        return mod
 
     if n == "huber_ema":
-        # kwargs: init_alpha=0.9, delta=1.0
-        mod = HuberEMA(
+        # kwargs: huber_init_alpha=0.9, huber_delta=1.0
+        return HuberEMA(
             channels=channels,
             init_alpha=kw.get("huber_init_alpha", 0.9),
             delta=kw.get("huber_delta", 1.0),
         )
-        try:
-            mod = torch.compile(mod)
-        except Exception:
-            pass
-        return mod
 
     raise ValueError(f"Unknown trend module: {name}")
