@@ -505,6 +505,17 @@ def build_trend_module(name: str, channels: int, **kw) -> nn.Module:
             debias=kw.get("fastema_debias", False),   # default False (paper EMA style)
         )
 
+    if n == "fast_multi_ema":
+        # kwargs: mema_K (int), mema_init_alphas (list[float] or None)
+        init_alphas = kw.get("mema_init_alphas", None)
+        if isinstance(init_alphas, str) and init_alphas:
+            init_alphas = [float(x) for x in init_alphas.split(",")]
+        return FastMultiEMAMixture(
+            channels=channels,
+            K=kw.get("mema_K", 3),
+            init_alphas=init_alphas if init_alphas is not None else (0.8, 0.9, 0.98),
+        )
+
     # -------- Alpha–Beta (optionally compiled) --------
     if n == "alpha_beta":
         mod = AlphaBetaFilter(
