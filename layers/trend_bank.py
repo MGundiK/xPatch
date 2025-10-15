@@ -254,18 +254,29 @@ class FastMultiEMAMixture(nn.Module):
         self.clamp = clamp
 
     def forward(self, x):
-        B,T,C = x.shape
-        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(x.device).to(x.dtype)  # [K,C]
-        t_idx = torch.arange(T, device=x.device, dtype=x.dtype).view(T, 1, 1)   # [T,1,1]
-        a_pow = torch.pow(a.unsqueeze(0), t_idx)                                # [T,K,C]
-        weights = a_pow.clone()
-        weights[1:,:,:] = weights[1:,:,:] * (1 - a.unsqueeze(0))                         # [T,K,C]
-        divisor = a_pow.clamp_min(1e-8)                                                  # [T,K,C]
-        xw = (x.unsqueeze(2) * weights.unsqueeze(0))                                     # [B,T,K,C]
-        yk = torch.cumsum(xw, dim=1) / divisor.unsqueeze(0)                              # [B,T,K,C]
-        mix = F.softmax(self.mix_logits.to(x.device).to(x.dtype), dim=-1).transpose(0,1) # [K,C]
-        trend = (yk * mix.view(1,1,self.K,C)).sum(dim=2)                                 # [B,T,C]
+        B, T, C = x.shape
+        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(x.device, x.dtype)  # [K,C]
+    
+        # Time powers (no in-place ops)
+        t_idx  = torch.arange(T, device=x.device, dtype=x.dtype).view(T, 1, 1)        # [T,1,1]
+        a_pow  = torch.pow(a.unsqueeze(0), t_idx)                                     # [T,K,C]
+    
+        # Geometric weights w_k = (1-a)*a^k for k>=1, and w_0 = 1 (matches cumulative form)
+        one = torch.ones(1, self.K, C, device=x.device, dtype=x.dtype)                # [1,K,C]
+        scale_rest = (1 - a).unsqueeze(0).expand(T - 1, self.K, C) if T > 1 else one[:, : , :] * 0
+        scale = torch.cat([one, scale_rest], dim=0) if T > 1 else one                 # [T,K,C]
+        weights = a_pow * scale                                                       # [T,K,C]
+    
+        # Cumulative convolution via cumsum (no in-place)
+        xw = x.unsqueeze(2) * weights.unsqueeze(0)                                    # [B,T,K,C]
+        denom = a_pow.clamp_min(1e-8).unsqueeze(0)                                    # [1,T,K,C]
+        yk = torch.cumsum(xw, dim=1) / denom                                          # [B,T,K,C]
+    
+        # Mixture across K (avoid in-place; avoid view writes)
+        mix = F.softmax(self.mix_logits.to(x.device, x.dtype), dim=-1).transpose(0, 1)  # [K,C]
+        trend = (yk * mix.view(1, 1, self.K, C)).sum(dim=2)                           # [B,T,C]
         return trend
+
 
 
 # ============================================================
