@@ -238,48 +238,49 @@ class FastLearnableEMA(nn.Module):
 class FastMultiEMAMixture(nn.Module):
     """
     K parallel EMAs with per-channel α_k and softmax mixture per channel.
+    Numerically stable (no a^{-t}), causal.
     x: [B,T,C] -> trend: [B,T,C]
     """
-    def __init__(self, channels, K=3, init_alphas=(0.8,0.9,0.98), clamp=(1e-4, 1-1e-4)):
+    def __init__(self, channels, K=3, init_alphas=(0.8, 0.9, 0.98), clamp=(1e-4, 1-1e-4)):
         super().__init__()
         self.K = K
         if len(init_alphas) < K:
-            # fill linearly if fewer provided
-            init_alphas = list(init_alphas) + list(torch.linspace(0.7, 0.99, K - len(init_alphas)).tolist())
+            init_alphas = list(init_alphas) + list(torch.linspace(0.7, 0.99, K-len(init_alphas)).tolist())
         init = torch.stack([torch.logit(torch.tensor(a).clamp(*clamp)) for a in init_alphas[:K]], dim=0)  # [K]
         self.logit_alpha = nn.Parameter(init.unsqueeze(-1).repeat(1, channels))  # [K,C]
         self.mix_logits  = nn.Parameter(torch.zeros(channels, K))                # [C,K]
         self.clamp = clamp
 
-    def forward(self, x):
-        """
-        Exact recursive EMAs (K in parallel), then a per-channel softmax mixture.
-        x: [B,T,C] -> trend: [B,T,C]
-        """
+    def forward(self, x):  # x: [B,T,C]
         B, T, C = x.shape
-        device, dtype = x.device, x.dtype
-    
-        # α_k per (K,C) and (1-α_k)
-        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(device, dtype)     # [K,C]
-        b = (1.0 - a)                                                                # [K,C]
-        a_bc = a.view(1, 1, self.K, C)                                               # [1,1,K,C]
-        b_bc = b.view(1, 1, self.K, C)                                               # [1,1,K,C]
-    
-        # Allocate outputs for all K EMAs: [B,T,K,C]
-        yk = torch.zeros(B, T, self.K, C, device=device, dtype=dtype)
-    
-        # Initialize at t=0 by copying x0 across all K: [B,K,C]
-        yk[:, 0, :, :] = x[:, 0, :].unsqueeze(1).expand(-1, self.K, -1)
-    
-        # Time recursion (vectorized over B,K,C)
+
+        # Do the math in fp32 for stability, cast back at the end
+        x32 = x.to(dtype=torch.float32)
+
+        a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(device=x.device, dtype=torch.float32)  # [K,C]
+        a = a.unsqueeze(0)  # [1,K,C]
+        one_minus_a = 1.0 - a                                     # [1,K,C]
+
+        # init y_k at t=0 as x0
+        x0 = x32[:, 0, :]                                         # [B,C]
+        yk_prev = x0.unsqueeze(1).expand(B, self.K, C).contiguous()  # [B,K,C]
+
+        # allocate output buffer
+        yk_all = torch.empty(B, T, self.K, C, device=x.device, dtype=torch.float32)
+        yk_all[:, 0, :, :] = yk_prev
+
+        # stable recurrence over time
         for t in range(1, T):
-            # y_t^k = α_k * y_{t-1}^k + (1-α_k) * x_t
-            yk[:, t, :, :] = a_bc * yk[:, t-1, :, :] + b_bc * x[:, t, :].unsqueeze(1)
-    
-        # Per-channel mixture over K (time-invariant softmax)
-        mix = torch.softmax(self.mix_logits.to(device, dtype), dim=-1).transpose(0, 1)  # [K,C]
-        trend = (yk * mix.view(1, 1, self.K, C)).sum(dim=2)                              # [B,T,C]
-        return trend
+            xt = x32[:, t, :].unsqueeze(1)                        # [B,1,C]
+            yk_prev = a * yk_prev + one_minus_a * xt              # [B,K,C] (broadcast over K,C)
+            yk_all[:, t, :, :] = yk_prev
+
+        # soft mix over K per channel
+        mix = F.softmax(self.mix_logits.to(device=x.device, dtype=torch.float32), dim=-1)  # [C,K]
+        trend = (yk_all * mix.T.view(1,1,self.K,C)).sum(dim=2)      # [B,T,C]
+
+        return trend.to(dtype=x.dtype)
+
 
 
 
