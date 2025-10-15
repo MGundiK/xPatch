@@ -256,8 +256,8 @@ class FastMultiEMAMixture(nn.Module):
     def forward(self, x):
         B,T,C = x.shape
         a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(x.device).to(x.dtype)  # [K,C]
-        t_idx = torch.arange(T, device=x.device, dtype=x.dtype).view(T,1)                # [T,1]
-        a_pow = torch.pow(a.unsqueeze(0), t_idx)                                         # [T,K,C]
+        t_idx = torch.arange(T, device=x.device, dtype=x.dtype).view(T, 1, 1)   # [T,1,1]
+        a_pow = torch.pow(a.unsqueeze(0), t_idx)                                # [T,K,C]
         weights = a_pow.clone()
         weights[1:,:,:] = weights[1:,:,:] * (1 - a.unsqueeze(0))                         # [T,K,C]
         divisor = a_pow.clamp_min(1e-8)                                                  # [T,K,C]
