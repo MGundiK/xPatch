@@ -68,6 +68,12 @@ class DECOMP(nn.Module):
          tcn_kernel: int = 7,
          tcn_beta: float = 0.3,
          tcn_final_avg: int = 0,
+        # ---------- Causal Window Smoother ----------
+         cw_kind: str = "hann",
+         cw_L:    int = 33,
+         cw_beta: float = 8.0,
+         cw_a:    int = 2,
+         cw_per_channel: bool = False,
 
         # ---- NEW: pass-through kwargs for trend_bank modules ----
         **trend_kwargs
@@ -115,6 +121,11 @@ class DECOMP(nn.Module):
                 raise ValueError("tcn_trend requires 'channels' (configs.enc_in).")
             self.ma = TCSmoother(channels=channels, hidden_mult=tcn_hidden_mult, n_blocks=tcn_blocks,
                                  kernel=tcn_kernel, beta=tcn_beta, final_avg=tcn_final_avg)
+
+        elif self.ma_type in ('window_hann','window_kaiser','window_lanczos','window_hann_poisson'):
+            # reuse your existing causal-window knobs (cw_*) you already added earlier
+            kind = self.ma_type.split('_', 1)[1]  # 'hann'|'kaiser'|'lanczos'|'hann_poisson'
+            self.ma = CausalWindowTrend(kind=kind, L=cw_L, beta=cw_beta, a=cw_a, per_channel=cw_per_channel)
 
         # ---- NEW: your fast learnable family via the factory ----
         elif self.ma_type in {
