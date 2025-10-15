@@ -262,23 +262,25 @@ class FastMultiEMAMixture(nn.Module):
         # α_k per (K,C) and (1-α_k)
         a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(device, dtype)     # [K,C]
         b = (1.0 - a)                                                                # [K,C]
-    
-        # Allocate output for all K EMAs: [B,T,K,C]
-        yk = torch.zeros(B, T, self.K, C, device=device, dtype=dtype)
-        # Initialize with x0 so the recursion is unbiased at t=0 (matches common EMA practice)
-        yk[:, 0, :, :] = x[:, 0, :].unsqueeze(2)                                     # broadcast over K
-    
-        # Vectorized recursion across batch & channels; loop over time only
         a_bc = a.view(1, 1, self.K, C)                                               # [1,1,K,C]
         b_bc = b.view(1, 1, self.K, C)                                               # [1,1,K,C]
+    
+        # Allocate outputs for all K EMAs: [B,T,K,C]
+        yk = torch.zeros(B, T, self.K, C, device=device, dtype=dtype)
+    
+        # Initialize at t=0 by copying x0 across all K: [B,K,C]
+        yk[:, 0, :, :] = x[:, 0, :].unsqueeze(1).expand(-1, self.K, -1)
+    
+        # Time recursion (vectorized over B,K,C)
         for t in range(1, T):
             # y_t^k = α_k * y_{t-1}^k + (1-α_k) * x_t
-            yk[:, t, :, :] = a_bc * yk[:, t-1, :, :] + b_bc * x[:, t, :].unsqueeze(2)
+            yk[:, t, :, :] = a_bc * yk[:, t-1, :, :] + b_bc * x[:, t, :].unsqueeze(1)
     
         # Per-channel mixture over K (time-invariant softmax)
         mix = torch.softmax(self.mix_logits.to(device, dtype), dim=-1).transpose(0, 1)  # [K,C]
         trend = (yk * mix.view(1, 1, self.K, C)).sum(dim=2)                              # [B,T,C]
         return trend
+
 
 
 
