@@ -187,9 +187,6 @@ class HannPoissonFIR(CausalFIRWindow):
 # 1) Learnable EMA (α per channel)
 # ============================================================
 
-import torch
-from torch import nn
-
 class FastLearnableEMA(nn.Module):
     """
     EMA with learnable per-channel α, stable autograd (no in-place slicing).
