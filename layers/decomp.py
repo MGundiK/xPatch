@@ -131,7 +131,7 @@ class DECOMP(nn.Module):
         elif self.ma_type in {
             "fast_ema", "alpha_beta",
             "kaiser_fir", "hann_poisson_fir",
-            "ewrls_fast", "huber_ema".
+            "ewrls_fast", "huber_ema",
             "fast_multi_ema"
         }:
             if channels is None:
