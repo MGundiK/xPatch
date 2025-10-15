@@ -234,6 +234,7 @@ class FastLearnableEMA(nn.Module):
 # 2) Multi-α EMA mixture (K time constants + learned mixing)
 # ============================================================
 
+
 class FastMultiEMAMixture(nn.Module):
     """
     K parallel EMAs with per-channel α_k and softmax mixture per channel.
@@ -243,36 +244,42 @@ class FastMultiEMAMixture(nn.Module):
         super().__init__()
         self.K = K
         if len(init_alphas) < K:
-            import numpy as np
-            init_alphas = list(init_alphas) + list(np.linspace(0.7, 0.99, K-len(init_alphas)))
+            # fill linearly if fewer provided
+            init_alphas = list(init_alphas) + list(torch.linspace(0.7, 0.99, K - len(init_alphas)).tolist())
         init = torch.stack([torch.logit(torch.tensor(a).clamp(*clamp)) for a in init_alphas[:K]], dim=0)  # [K]
         self.logit_alpha = nn.Parameter(init.unsqueeze(-1).repeat(1, channels))  # [K,C]
         self.mix_logits  = nn.Parameter(torch.zeros(channels, K))                # [C,K]
         self.clamp = clamp
 
-    def forward(self, x):
+    def forward(self, x):  # x: [B,T,C]
         B, T, C = x.shape
         a = torch.sigmoid(self.logit_alpha).clamp(*self.clamp).to(x.device, x.dtype)  # [K,C]
-    
-        # Time powers (no in-place ops)
-        t_idx  = torch.arange(T, device=x.device, dtype=x.dtype).view(T, 1, 1)        # [T,1,1]
-        a_pow  = torch.pow(a.unsqueeze(0), t_idx)                                     # [T,K,C]
-    
-        # Geometric weights w_k = (1-a)*a^k for k>=1, and w_0 = 1 (matches cumulative form)
-        one = torch.ones(1, self.K, C, device=x.device, dtype=x.dtype)                # [1,K,C]
-        scale_rest = (1 - a).unsqueeze(0).expand(T - 1, self.K, C) if T > 1 else one[:, : , :] * 0
-        scale = torch.cat([one, scale_rest], dim=0) if T > 1 else one                 # [T,K,C]
-        weights = a_pow * scale                                                       # [T,K,C]
-    
-        # Cumulative convolution via cumsum (no in-place)
-        xw = x.unsqueeze(2) * weights.unsqueeze(0)                                    # [B,T,K,C]
-        denom = a_pow.clamp_min(1e-8).unsqueeze(0)                                    # [1,T,K,C]
-        yk = torch.cumsum(xw, dim=1) / denom                                          # [B,T,K,C]
-    
-        # Mixture across K (avoid in-place; avoid view writes)
-        mix = F.softmax(self.mix_logits.to(x.device, x.dtype), dim=-1).transpose(0, 1)  # [K,C]
-        trend = (yk * mix.view(1, 1, self.K, C)).sum(dim=2)                           # [B,T,C]
+
+        # powers a^t and a^{-t}, shape [T,K,C]
+        t_idx = torch.arange(T, device=x.device, dtype=x.dtype).view(T, 1, 1)         # [T,1,1]
+        a_pow   = torch.pow(a.unsqueeze(0),  t_idx)                                   # [T,K,C]
+        a_npow  = torch.pow(a.unsqueeze(0), -t_idx)                                   # [T,K,C], a^{-t} with a^0=1
+
+        # x' with x'_0 = 0, x'_{i>0} = x_i
+        xprime = x.clone()
+        if T > 0:
+            xprime[:, 0, :] = 0
+
+        # z_i = x'_i * a^{-i}
+        z = xprime.unsqueeze(2) * a_npow.unsqueeze(0)                                  # [B,T,K,C]
+
+        # c_t = sum_{i=1..t} z_i
+        c = torch.cumsum(z, dim=1)                                                     # [B,T,K,C]
+
+        # y_t^(k) = a^t * x0 + (1-a) * a^t * c_t
+        x0 = x[:, 0:1, :].unsqueeze(2)                                                 # [B,1,1,C]
+        yk = a_pow.unsqueeze(0) * (x0 + (1 - a).unsqueeze(0).unsqueeze(0) * c)         # [B,T,K,C]
+
+        # soft mix over K per channel
+        mix = F.softmax(self.mix_logits.to(x.device, x.dtype), dim=-1).transpose(0, 1) # [K,C]
+        trend = (yk * mix.view(1, 1, self.K, C)).sum(dim=2)                            # [B,T,C]
         return trend
+
 
 
 
