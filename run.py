@@ -172,7 +172,12 @@ parser.add_argument('--hannp_learnable_mix', action='store_true', help='Hann-Poi
 parser.add_argument('--huber_init_alpha', type=float, default=0.9, help='Huber EMA: init alpha')
 parser.add_argument('--huber_delta', type=float, default=1.0, help='Huber EMA: Huber delta')
 
-
+# ============== Trend (optional) ==============
+# Minimal: only two args. If omitted, model falls back to baseline trend head internally.
+parser.add_argument('--trend_head', type=str, default=None,
+                    help="Trend head: mlp_baseline | fir | basis (optional; default None -> baseline)")
+parser.add_argument('--trend_cfg', type=str, default=None,
+                    help='JSON dict with kwargs for the chosen trend head (optional)')
 
 # optimization
 parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
