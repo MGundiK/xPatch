@@ -6,6 +6,8 @@ from layers.decomp import DECOMP
 from layers.network import Network
 from layers.revin import RevIN
 
+
+
 class Model(nn.Module):
     def __init__(self, configs):
         super(Model, self).__init__()
@@ -140,6 +142,52 @@ class Model(nn.Module):
         # Main forecaster network
         #self.net = Network(seq_len, pred_len, patch_len, stride, padding_patch)
         # === Trend head plumbing (safe fallback happens inside Network) ===
+        # ===============================
+        # Trend head (optional, minimal)
+        # ===============================
+        # Which head?
+        trend_head = getattr(configs, "trend_head", None)
+
+        # FIR head kwargs (only include if provided)
+        fir_kwargs = dict(
+            k_list     = getattr(configs, "fir_k_list", None),
+            d_list     = getattr(configs, "fir_d_list", None),
+            channels   = getattr(configs, "fir_channels", None),
+            gelu       = getattr(configs, "fir_gelu", None),
+            aa_pool    = getattr(configs, "fir_aa_pool", None),
+            smooth_l2  = getattr(configs, "fir_smooth_l2", None),
+        )
+        # inline normalization (no helpers)
+        if isinstance(fir_kwargs["k_list"], str) and fir_kwargs["k_list"]:
+            fir_kwargs["k_list"] = [int(x) for x in fir_kwargs["k_list"].split(",")]
+        if isinstance(fir_kwargs["d_list"], str) and fir_kwargs["d_list"]:
+            fir_kwargs["d_list"] = [int(x) for x in fir_kwargs["d_list"].split(",")]
+        if fir_kwargs["gelu"] is not None:
+            fir_kwargs["gelu"] = bool(int(fir_kwargs["gelu"]))
+        if fir_kwargs["aa_pool"] is not None:
+            fir_kwargs["aa_pool"] = bool(int(fir_kwargs["aa_pool"]))
+
+        # Basis head kwargs (only include if provided)
+        basis_kwargs = dict(
+            poly_degree  = getattr(configs, "basis_poly_degree", None),
+            fourier_k    = getattr(configs, "basis_fourier_k", None),
+            normalize_t  = getattr(configs, "basis_normalize_t", None),
+        )
+        if basis_kwargs["normalize_t"] is not None:
+            basis_kwargs["normalize_t"] = bool(int(basis_kwargs["normalize_t"]))
+
+        # choose which to pass
+        trend_cfg = None
+        if isinstance(trend_head, str) and trend_head.strip():
+            if trend_head == "fir":
+                # keep only provided keys (not None)
+                trend_cfg = {k: v for k, v in fir_kwargs.items() if v is not None}
+            elif trend_head == "basis":
+                trend_cfg = {k: v for k, v in basis_kwargs.items() if v is not None}
+            else:
+                trend_cfg = None  # unknown -> Network will fallback to baseline
+
+        # Main forecaster network
         # Network with optional trend head selection
         self.net = Network(
             seq_len=configs.seq_len,
