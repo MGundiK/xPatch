@@ -174,10 +174,21 @@ parser.add_argument('--huber_delta', type=float, default=1.0, help='Huber EMA: H
 
 # ============== Trend (optional) ==============
 # Minimal: only two args. If omitted, model falls back to baseline trend head internally.
+# ============== Trend (optional, explicit flags; no JSON) ==============
 parser.add_argument('--trend_head', type=str, default=None,
                     help="Trend head: mlp_baseline | fir | basis (optional; default None -> baseline)")
-parser.add_argument('--trend_cfg', type=str, default=None,
-                    help='JSON dict with kwargs for the chosen trend head (optional)')
+# FIR head params
+parser.add_argument('--fir_k_list', type=str, default=None, help='CSV list of kernel sizes, e.g. "32,64"')
+parser.add_argument('--fir_d_list', type=str, default=None, help='CSV list of dilations, e.g. "1,4"')
+parser.add_argument('--fir_channels', type=int, default=None, help='Internal channels (e.g., 16)')
+parser.add_argument('--fir_gelu', type=int, default=None, help='1/0 to enable GELU between convs')
+parser.add_argument('--fir_aa_pool', type=int, default=None, help='1/0 to use AdaptiveAvgPool1d to pred_len')
+parser.add_argument('--fir_smooth_l2', type=float, default=None, help='L2 penalty for filter smoothness')
+
+# Basis head params
+parser.add_argument('--basis_poly_degree', type=int, default=None, help='Polynomial degree (e.g., 2)')
+parser.add_argument('--basis_fourier_k', type=int, default=None, help='Very low-frequency term count (e.g., 4)')
+parser.add_argument('--basis_normalize_t', type=int, default=None, help='1/0: use t in [0,1]')
 
 # optimization
 parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
