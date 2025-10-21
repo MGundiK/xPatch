@@ -138,7 +138,21 @@ class Model(nn.Module):
         )
 
         # Main forecaster network
-        self.net = Network(seq_len, pred_len, patch_len, stride, padding_patch)
+        #self.net = Network(seq_len, pred_len, patch_len, stride, padding_patch)
+        # === Trend head plumbing (safe fallback happens inside Network) ===
+        trend_head = getattr(configs, "trend_head", None)   # may be None/empty
+        trend_cfg  = getattr(configs, "trend_cfg", None)    # may be None
+
+        # Build Network (seasonality head unchanged)
+        self.net = Network(
+            seq_len=configs.seq_len,
+            pred_len=configs.pred_len,
+            patch_len=configs.patch_len,
+            stride=configs.stride,
+            padding_patch=configs.padding_patch,
+            trend_head=trend_head,
+            trend_cfg=trend_cfg
+        )
 
     def forward(self, x):
         # x: [Batch, Input, Channel]
