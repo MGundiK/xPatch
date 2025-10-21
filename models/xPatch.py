@@ -146,18 +146,21 @@ class Model(nn.Module):
         # Trend head (optional, minimal)
         # ===============================
         # Which head?
+        # ===============================
+        # Trend head (optional; associative flags)
+        # ===============================
         trend_head = getattr(configs, "trend_head", None)
 
-        # FIR head kwargs (only include if provided)
+        # FIR head
         fir_kwargs = dict(
             k_list     = getattr(configs, "fir_k_list", None),
             d_list     = getattr(configs, "fir_d_list", None),
             channels   = getattr(configs, "fir_channels", None),
-            gelu       = getattr(configs, "fir_gelu", None),
-            aa_pool    = getattr(configs, "fir_aa_pool", None),
+            gelu       = getattr(configs, "fir_gelu", None),       # 0/1
+            aa_pool    = getattr(configs, "fir_aa_pool", None),     # 0/1
             smooth_l2  = getattr(configs, "fir_smooth_l2", None),
         )
-        # inline normalization (no helpers)
+        # inline parse: CSV -> list[int], 0/1 -> bool
         if isinstance(fir_kwargs["k_list"], str) and fir_kwargs["k_list"]:
             fir_kwargs["k_list"] = [int(x) for x in fir_kwargs["k_list"].split(",")]
         if isinstance(fir_kwargs["d_list"], str) and fir_kwargs["d_list"]:
@@ -167,23 +170,51 @@ class Model(nn.Module):
         if fir_kwargs["aa_pool"] is not None:
             fir_kwargs["aa_pool"] = bool(int(fir_kwargs["aa_pool"]))
 
-        # Basis head kwargs (only include if provided)
+        # Basis head
         basis_kwargs = dict(
             poly_degree  = getattr(configs, "basis_poly_degree", None),
             fourier_k    = getattr(configs, "basis_fourier_k", None),
-            normalize_t  = getattr(configs, "basis_normalize_t", None),
+            normalize_t  = getattr(configs, "basis_normalize_t", None),  # 0/1
         )
         if basis_kwargs["normalize_t"] is not None:
             basis_kwargs["normalize_t"] = bool(int(basis_kwargs["normalize_t"]))
 
-        # choose which to pass
+        # Local linear head
+        local_lin_kwargs = dict(
+            k = getattr(configs, "local_lin_k", None),
+        )
+
+        # Delta head
+        delta_kwargs = dict(
+            mode   = getattr(configs, "delta_mode", None),   # 'last' | 'lin'
+            k      = getattr(configs, "delta_k", None),
+            hidden = getattr(configs, "delta_hidden", None),
+        )
+
+        # Downsampled MLP head
+        ds_mlp_kwargs = dict(
+            stride = getattr(configs, "ds_mlp_stride", None),
+            hidden = getattr(configs, "ds_mlp_hidden", None),
+        )
+
+        # choose which kwargs to pass
         trend_cfg = None
         if isinstance(trend_head, str) and trend_head.strip():
             if trend_head == "fir":
-                # keep only provided keys (not None)
                 trend_cfg = {k: v for k, v in fir_kwargs.items() if v is not None}
             elif trend_head == "basis":
                 trend_cfg = {k: v for k, v in basis_kwargs.items() if v is not None}
+            elif trend_head == "local_lin":
+                trend_cfg = {k: v for k, v in local_lin_kwargs.items() if v is not None}
+            elif trend_head == "delta":
+                # sanitize mode
+                if delta_kwargs["mode"] is not None:
+                    m = str(delta_kwargs["mode"]).lower()
+                    if m not in ("last", "lin"):
+                        delta_kwargs["mode"] = None
+                trend_cfg = {k: v for k, v in delta_kwargs.items() if v is not None}
+            elif trend_head == "ds_mlp":
+                trend_cfg = {k: v for k, v in ds_mlp_kwargs.items() if v is not None}
             else:
                 trend_cfg = None  # unknown -> Network will fallback to baseline
 
