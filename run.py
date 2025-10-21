@@ -190,6 +190,18 @@ parser.add_argument('--basis_poly_degree', type=int, default=None, help='Polynom
 parser.add_argument('--basis_fourier_k', type=int, default=None, help='Very low-frequency term count (e.g., 4)')
 parser.add_argument('--basis_normalize_t', type=int, default=None, help='1/0: use t in [0,1]')
 
+# Local linear head
+parser.add_argument('--local_lin_k', type=int, default=None)
+
+# Delta head
+parser.add_argument('--delta_mode', type=str, default=None, help="last | lin")
+parser.add_argument('--delta_k', type=int, default=None)
+parser.add_argument('--delta_hidden', type=int, default=None)
+
+# Downsampled MLP head
+parser.add_argument('--ds_mlp_stride', type=int, default=None)
+parser.add_argument('--ds_mlp_hidden', type=int, default=None)
+
 # optimization
 parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
 parser.add_argument('--itr', type=int, default=1, help='experiments times')
