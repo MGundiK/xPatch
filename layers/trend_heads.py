@@ -114,3 +114,88 @@ class BasisTrendHead(TrendHeadBase):
         y = c @ self.Phi_pred          # [BC, P]
         y = y + self.residual(c)       # [BC, P]
         return y
+
+# LocalLinearTrendHead (closed-form slope, zero trainable params)
+# fit a line on the last K points of the EMA trend (per channel, per batch) 
+# and extrapolate it. This is the classic “local level + slope” extrapolator; 
+# very robust when the input still contains seasonality leakage.
+# the slope over the last K points ignores most of that and extrapolates the slower drift.
+class LocalLinearTrendHead(nn.Module):
+    """
+    Closed-form local linear extrapolation on the last K points.
+    IO: [BC, seq_len] -> [BC, pred_len]
+    """
+    def __init__(self, seq_len:int, pred_len:int, k:int=32):
+        super().__init__()
+        self.seq_len = seq_len
+        self.pred_len = pred_len
+        self.k = max(2, int(k))
+        # Precompute normal equations for x = 0..k-1
+        t = torch.arange(self.k, dtype=torch.float32)          # [k]
+        X = torch.stack([torch.ones_like(t), t], dim=1)        # [k,2]
+        XtX_inv = torch.inverse(X.t() @ X)                     # [2,2]
+        self.register_buffer('W_beta', XtX_inv @ X.t(), persistent=False)  # [2,k]
+        t_pred = torch.arange(self.k, self.k + pred_len, dtype=torch.float32)  # future steps
+        Phi = torch.stack([torch.ones_like(t_pred), t_pred], dim=0)            # [2,P]
+        self.register_buffer('Phi_pred', Phi, persistent=False)                # [2,P]
+
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
+        xk = t[:, -self.k:]             # [BC,k]
+        beta = xk @ self.W_beta.t()     # [BC,2]  (intercept, slope)
+        y = beta @ self.Phi_pred        # [BC,P]
+        return y
+
+# ------------ DeltaTrendHead (predict only a small correction on top of a naive) ---------- #
+# compute a naive trend forecast from t (repeat-last or short linear), and the head predicts Δ only:
+# y_trend = naive(t)+fθ​(t)
+class DeltaTrendHead(nn.Module):
+    """
+    Predict a small correction on top of a naive trend forecast.
+    mode: 'last' or 'lin'; k used for 'lin'
+    """
+    def __init__(self, seq_len:int, pred_len:int, mode:str='last', k:int=16, hidden:int=128):
+        super().__init__()
+        self.seq_len, self.pred_len, self.mode, self.k = seq_len, pred_len, mode, max(2,int(k))
+        self.corr = nn.Sequential(nn.Linear(seq_len, hidden), nn.GELU(), nn.Linear(hidden, pred_len))
+        if self.mode == 'lin':
+            t = torch.arange(self.k, dtype=torch.float32)
+            X = torch.stack([torch.ones_like(t), t], dim=1)
+            XtX_inv = torch.inverse(X.t() @ X)
+            self.register_buffer('W_beta', XtX_inv @ X.t(), persistent=False)
+            t_pred = torch.arange(self.k, self.k + pred_len, dtype=torch.float32)
+            self.register_buffer('Phi_pred', torch.stack([torch.ones_like(t_pred), t_pred], dim=0), persistent=False)
+
+    def _naive(self, t: torch.Tensor) -> torch.Tensor:
+        if self.mode == 'last':
+            return t[:, -1:].repeat(1, self.pred_len)
+        # linear
+        xk = t[:, -self.k:]
+        beta = xk @ self.W_beta.t()
+        return beta @ self.Phi_pred
+
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
+        base = self._naive(t)
+        delta = self.corr(t)
+        return base + delta
+
+
+# ------- DownsampledMLPTrendHead (anti-alias → tiny MLP → upsample) ------------- #
+class DownsampledMLPTrendHead(nn.Module):
+    """
+    Anti-aliased downsample -> small MLP -> linear upsample to pred_len.
+    """
+    def __init__(self, seq_len:int, pred_len:int, stride:int=4, hidden:int=128):
+        super().__init__()
+        self.seq_len, self.pred_len, self.stride = seq_len, pred_len, int(stride)
+        self.pool = nn.AvgPool1d(kernel_size=self.stride, stride=self.stride, ceil_mode=False)
+        Lc = math.floor(seq_len / self.stride)
+        self.mlp = nn.Sequential(
+            nn.Linear(Lc, hidden),
+            nn.GELU(),
+            nn.Linear(hidden, pred_len)
+        )
+    def forward(self, t: torch.Tensor) -> torch.Tensor:
+        x = self.pool(t.unsqueeze(1)).squeeze(1)  # [BC, Lc]
+        return self.mlp(x)                         # [BC, P]
+
+
