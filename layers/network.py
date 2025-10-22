@@ -5,16 +5,23 @@
 import torch
 from torch import nn
 
-from .trend_heads import (
+from layers.trend_heads import (
     BaselineMLPTrendHead,
     FIRTrendHead,
     BasisTrendHead,
+    LocalLinearTrendHead,
+    DeltaTrendHead,
+    DownsampledMLPTrendHead
 )
 
+
 _TREND_FACTORY = {
-    "mlp_baseline": BaselineMLPTrendHead,  # original xPatch linear stream
-    "fir": FIRTrendHead,                   # learnable low-pass FIR bank
-    "basis": BasisTrendHead,               # polynomial + low-freq Fourier
+    "mlp_baseline": BaselineMLPTrendHead,
+    "fir":          FIRTrendHead,
+    "basis":        BasisTrendHead,
+    "local_lin":    LocalLinearTrendHead,
+    "delta":        DeltaTrendHead,
+    "ds_mlp":       DownsampledMLPTrendHead,
 }
 
 
@@ -84,6 +91,9 @@ class Network(nn.Module):
             selected_head = "mlp_baseline"
 
         if trend_cfg is None:
+            trend_cfg = {}
+
+        if selected_head != (trend_head or "mlp_baseline"):
             trend_cfg = {}
 
         self.trend = _TREND_FACTORY[selected_head](
