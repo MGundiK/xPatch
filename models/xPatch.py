@@ -195,7 +195,14 @@ class Model(nn.Module):
         ds_mlp_kwargs = dict(
             stride = getattr(configs, "ds_mlp_stride", None),
             hidden = getattr(configs, "ds_mlp_hidden", None),
+            hann   = getattr(configs, "ds_mlp_hann", None),     # 0/1
+            causal = getattr(configs, "ds_mlp_causal", None),   # 0/1
         )
+        if ds_mlp_kwargs["hann"] is not None:
+            ds_mlp_kwargs["hann"] = bool(int(ds_mlp_kwargs["hann"]))
+        if ds_mlp_kwargs["causal"] is not None:
+            ds_mlp_kwargs["causal"] = bool(int(ds_mlp_kwargs["causal"]))
+
 
         # choose which kwargs to pass
         trend_cfg = None
