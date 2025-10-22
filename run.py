@@ -201,6 +201,9 @@ parser.add_argument('--delta_hidden', type=int, default=None)
 # Downsampled MLP head
 parser.add_argument('--ds_mlp_stride', type=int, default=None)
 parser.add_argument('--ds_mlp_hidden', type=int, default=None)
+parser.add_argument('--ds_mlp_hann', type=str, default=None, help='0/1: use Hann AA (kernel=2*stride)')
+parser.add_argument('--ds_mlp_causal', type=str, default=None, help='0/1: causal padding for AA')
+
 
 # optimization
 parser.add_argument('--num_workers', type=int, default=10, help='data loader num workers')
