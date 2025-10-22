@@ -6,6 +6,15 @@ from layers.decomp import DECOMP
 from layers.network import Network
 from layers.revin import RevIN
 
+from layers.trend_heads import (
+    BaselineMLPTrendHead,
+    FIRTrendHead,
+    BasisTrendHead,
+    LocalLinearTrendHead,
+    DeltaTrendHead,
+    DownsampledMLPTrendHead,
+)
+
 
 
 class Model(nn.Module):
