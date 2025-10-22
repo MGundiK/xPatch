@@ -169,8 +169,8 @@ class Model(nn.Module):
         # ===============================
         # Trend head (optional; associative flags)
         # ===============================
-        #trend_head = getattr(configs, "trend_head", None)
-        trend_cfg=trend_cfg,
+        trend_head = getattr(configs, "trend_head", None)
+        #trend_cfg=trend_cfg,
 
 
         # FIR head
