@@ -179,23 +179,80 @@ class DeltaTrendHead(nn.Module):
         return base + delta
 
 
-# ------- DownsampledMLPTrendHead (anti-alias → tiny MLP → upsample) ------------- #
+
+# ------- DownsampledMLPTrendHead (Hann AA, causal optional) ------------- #
 class DownsampledMLPTrendHead(nn.Module):
     """
-    Anti-aliased downsample -> small MLP -> linear upsample to pred_len.
+    Anti-aliased downsample (kernel = Hann, size = 2*stride by default)
+      -> small MLP -> direct map to pred_len.
+
+    Options:
+      - stride (int): downsample factor s
+      - hidden (int): MLP width
+      - hann (bool): if True use Hann FIR; if False, use AvgPool(kernel=stride, stride=stride)
+      - causal (bool): if True, padding is left-only (no look-ahead). If False, use centered padding.
+
+    IO: [BC, seq_len] -> [BC, pred_len]
     """
-    def __init__(self, seq_len:int, pred_len:int, stride:int=4, hidden:int=128):
+    def __init__(self, seq_len:int, pred_len:int,
+                 stride:int=4, hidden:int=128,
+                 hann:bool=False, causal:bool=True):
         super().__init__()
-        self.seq_len, self.pred_len, self.stride = seq_len, pred_len, int(stride)
-        self.pool = nn.AvgPool1d(kernel_size=self.stride, stride=self.stride, ceil_mode=False)
-        Lc = math.floor(seq_len / self.stride)
+        self.seq_len, self.pred_len = int(seq_len), int(pred_len)
+        self.stride = int(stride)
+        self.hann = bool(hann)
+        self.causal = bool(causal)
+
+        if self.hann:
+            # FIR low-pass with Hann window, kernel = 2*stride
+            k = int(2 * self.stride)
+            k = max(k, 2)  # safety
+            self.kernel_size = k
+
+            # Build fixed Hann kernel (sum=1)
+            n = torch.arange(k, dtype=torch.float32)
+            w = 0.5 - 0.5 * torch.cos(2.0 * math.pi * n / (k - 1))
+            w = w / w.sum()  # normalize
+
+            # conv pipeline: (optional) pad -> depthwise conv (per BC scalar channel)
+            self.pad_left = k - 1 if self.causal else (k // 2)
+            self.pad_right = 0 if self.causal else (k - 1 - self.pad_left)
+            self.pad = nn.ConstantPad1d((self.pad_left, self.pad_right), 0.0)
+
+            # single in/out channel because input is [BC, 1, L]
+            conv = nn.Conv1d(1, 1, kernel_size=k, stride=self.stride, bias=False)
+            with torch.no_grad():
+                conv.weight.zero_()
+                conv.weight[0, 0, :].copy_(w)
+            for p in conv.parameters():
+                p.requires_grad_(False)
+            self.aa = conv
+            # effective coarse length after causal padding:
+            # Lc = floor( (L + pad_left + pad_right - k)/s + 1 )
+            Lc = (self.seq_len + self.pad_left + self.pad_right - k) // self.stride + 1
+        else:
+            # Plain AvgPool with kernel=stride (boxcar)
+            self.pool = nn.AvgPool1d(kernel_size=self.stride, stride=self.stride, ceil_mode=False)
+            Lc = self.seq_len // self.stride
+
+        # tiny MLP at coarse rate
         self.mlp = nn.Sequential(
             nn.Linear(Lc, hidden),
             nn.GELU(),
             nn.Linear(hidden, pred_len)
         )
+
     def forward(self, t: torch.Tensor) -> torch.Tensor:
-        x = self.pool(t.unsqueeze(1)).squeeze(1)  # [BC, Lc]
-        return self.mlp(x)                         # [BC, P]
+        # t: [BC, L]
+        x = t.unsqueeze(1)  # [BC, 1, L]
+        if self.hann:
+            x = self.pad(x)
+            x = self.aa(x)         # [BC, 1, Lc]
+        else:
+            x = self.pool(x)       # [BC, 1, Lc]
+        x = x.squeeze(1)           # [BC, Lc]
+        y = self.mlp(x)            # [BC, P]
+        return y
+
 
 
