@@ -12,7 +12,7 @@ from layers.trend_heads import (
     BasisTrendHead,
     LocalLinearTrendHead,
     DeltaTrendHead,
-    DownsampledMLPTrendHead,
+    DownsampledMLPTrendHead
 )
 
 
@@ -256,8 +256,8 @@ class Model(nn.Module):
             stride=configs.stride,
             padding_patch=configs.padding_patch,
             # Safe fallback to baseline happens inside Network if these are None/unknown
-            trend_head=getattr(configs, "trend_head", None),
-            trend_cfg=getattr(configs, "trend_cfg", None),
+            trend_head=trend_head,#getattr(configs, "trend_head", None),
+            trend_cfg=trend_cfg #getattr(configs, "trend_cfg", None),
         )
 
 
