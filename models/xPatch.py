@@ -16,6 +16,17 @@ from layers.trend_heads import (
 )
 
 
+# Registry of available trend heads
+_TREND_FACTORY = {
+    "mlp_baseline": BaselineMLPTrendHead,
+    "fir":          FIRTrendHead,
+    "basis":        BasisTrendHead,
+    "local_lin":    LocalLinearTrendHead,
+    "delta":        DeltaTrendHead,
+    "ds_mlp":       DownsampledMLPTrendHead,   # ⬅️ the one you’re using
+}
+
+
 
 class Model(nn.Module):
     def __init__(self, configs):
@@ -158,7 +169,9 @@ class Model(nn.Module):
         # ===============================
         # Trend head (optional; associative flags)
         # ===============================
-        trend_head = getattr(configs, "trend_head", None)
+        #trend_head = getattr(configs, "trend_head", None)
+        trend_cfg=trend_cfg,
+
 
         # FIR head
         fir_kwargs = dict(
