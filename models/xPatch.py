@@ -16,15 +16,7 @@ from layers.trend_heads import (
 )
 
 
-# Registry of available trend heads
-_TREND_FACTORY = {
-    "mlp_baseline": BaselineMLPTrendHead,
-    "fir":          FIRTrendHead,
-    "basis":        BasisTrendHead,
-    "local_lin":    LocalLinearTrendHead,
-    "delta":        DeltaTrendHead,
-    "ds_mlp":       DownsampledMLPTrendHead,   # ⬅️ the one you’re using
-}
+
 
 
 
@@ -165,24 +157,19 @@ class Model(nn.Module):
         # ===============================
         # Trend head (optional, minimal)
         # ===============================
-        # Which head?
-        # ===============================
-        # Trend head (optional; associative flags)
-        # ===============================
+
+        # ---------------- Trend head config (assemble kwargs only) ----------------
         trend_head = getattr(configs, "trend_head", None)
-        #trend_cfg=trend_cfg,
-
-
+        
         # FIR head
         fir_kwargs = dict(
-            k_list     = getattr(configs, "fir_k_list", None),
-            d_list     = getattr(configs, "fir_d_list", None),
-            channels   = getattr(configs, "fir_channels", None),
-            gelu       = getattr(configs, "fir_gelu", None),       # 0/1
-            aa_pool    = getattr(configs, "fir_aa_pool", None),     # 0/1
-            smooth_l2  = getattr(configs, "fir_smooth_l2", None),
+            k_list    = getattr(configs, "fir_k_list", None),
+            d_list    = getattr(configs, "fir_d_list", None),
+            channels  = getattr(configs, "fir_channels", None),
+            gelu      = getattr(configs, "fir_gelu", None),      # 0/1
+            aa_pool   = getattr(configs, "fir_aa_pool", None),   # 0/1
+            smooth_l2 = getattr(configs, "fir_smooth_l2", None),
         )
-        # inline parse: CSV -> list[int], 0/1 -> bool
         if isinstance(fir_kwargs["k_list"], str) and fir_kwargs["k_list"]:
             fir_kwargs["k_list"] = [int(x) for x in fir_kwargs["k_list"].split(",")]
         if isinstance(fir_kwargs["d_list"], str) and fir_kwargs["d_list"]:
@@ -191,42 +178,45 @@ class Model(nn.Module):
             fir_kwargs["gelu"] = bool(int(fir_kwargs["gelu"]))
         if fir_kwargs["aa_pool"] is not None:
             fir_kwargs["aa_pool"] = bool(int(fir_kwargs["aa_pool"]))
-
+        
         # Basis head
         basis_kwargs = dict(
-            poly_degree  = getattr(configs, "basis_poly_degree", None),
-            fourier_k    = getattr(configs, "basis_fourier_k", None),
-            normalize_t  = getattr(configs, "basis_normalize_t", None),  # 0/1
+            poly_degree = getattr(configs, "basis_poly_degree", None),
+            fourier_k   = getattr(configs, "basis_fourier_k", None),
+            normalize_t = getattr(configs, "basis_normalize_t", None),  # 0/1
         )
         if basis_kwargs["normalize_t"] is not None:
             basis_kwargs["normalize_t"] = bool(int(basis_kwargs["normalize_t"]))
-
+        
         # Local linear head
         local_lin_kwargs = dict(
             k = getattr(configs, "local_lin_k", None),
         )
-
+        
         # Delta head
         delta_kwargs = dict(
-            mode   = getattr(configs, "delta_mode", None),   # 'last' | 'lin'
+            mode   = getattr(configs, "delta_mode", None),  # 'last' | 'lin'
             k      = getattr(configs, "delta_k", None),
             hidden = getattr(configs, "delta_hidden", None),
         )
-
+        if delta_kwargs["mode"] is not None:
+            m = str(delta_kwargs["mode"]).lower()
+            if m not in ("last", "lin"):
+                delta_kwargs["mode"] = None
+        
         # Downsampled MLP head
         ds_mlp_kwargs = dict(
             stride = getattr(configs, "ds_mlp_stride", None),
             hidden = getattr(configs, "ds_mlp_hidden", None),
-            hann   = getattr(configs, "ds_mlp_hann", None),     # 0/1
-            causal = getattr(configs, "ds_mlp_causal", None),   # 0/1
+            hann   = getattr(configs, "ds_mlp_hann", None),    # 0/1
+            causal = getattr(configs, "ds_mlp_causal", None),  # 0/1
         )
         if ds_mlp_kwargs["hann"] is not None:
             ds_mlp_kwargs["hann"] = bool(int(ds_mlp_kwargs["hann"]))
         if ds_mlp_kwargs["causal"] is not None:
             ds_mlp_kwargs["causal"] = bool(int(ds_mlp_kwargs["causal"]))
-
-
-        # choose which kwargs to pass
+        
+        # Choose which kwargs to pass
         trend_cfg = None
         if isinstance(trend_head, str) and trend_head.strip():
             if trend_head == "fir":
@@ -236,28 +226,20 @@ class Model(nn.Module):
             elif trend_head == "local_lin":
                 trend_cfg = {k: v for k, v in local_lin_kwargs.items() if v is not None}
             elif trend_head == "delta":
-                # sanitize mode
-                if delta_kwargs["mode"] is not None:
-                    m = str(delta_kwargs["mode"]).lower()
-                    if m not in ("last", "lin"):
-                        delta_kwargs["mode"] = None
                 trend_cfg = {k: v for k, v in delta_kwargs.items() if v is not None}
             elif trend_head == "ds_mlp":
                 trend_cfg = {k: v for k, v in ds_mlp_kwargs.items() if v is not None}
-            else:
-                trend_cfg = None  # unknown -> Network will fallback to baseline
-
-        # Main forecaster network
-        # Network with optional trend head selection
+        # else leave None to trigger baseline in Network
+        
+        # ---------------- Create Network (Network handles registry + fallback) ---------------
         self.net = Network(
-            seq_len=configs.seq_len,
-            pred_len=configs.pred_len,
-            patch_len=configs.patch_len,
-            stride=configs.stride,
-            padding_patch=configs.padding_patch,
-            # Safe fallback to baseline happens inside Network if these are None/unknown
-            trend_head=trend_head,#getattr(configs, "trend_head", None),
-            trend_cfg=trend_cfg #getattr(configs, "trend_cfg", None),
+            seq_len=seq_len,
+            pred_len=pred_len,
+            patch_len=patch_len,
+            stride=stride,
+            padding_patch=padding_patch,
+            trend_head=trend_head,
+            trend_cfg=trend_cfg,
         )
 
 
