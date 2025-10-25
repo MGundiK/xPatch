@@ -65,7 +65,7 @@ def _causal_mean_var(x: torch.Tensor, win: int) -> Tuple[torch.Tensor, torch.Ten
     var  = (mean2 - mean**2).clamp_min(0.0)             # [B,T,C]
     return mean, var
 
-
+'''
 class AdaptiveGaussianTrendCausal(nn.Module):
     """
     Causal Adaptive Gaussian Trend (AGF, causal):
@@ -129,4 +129,81 @@ class AdaptiveGaussianTrendCausal(nn.Module):
         w = torch.softmax(logits, dim=-1)                           # convex weights over K
 
         trend = (Y * w).sum(dim=-1)                                 # [B,T,C]
+        return trend
+'''
+
+class AdaptiveGaussianTrendCausal(nn.Module):
+    """
+    Causal Adaptive Gaussian Trend (AGF, causal):
+      - Predefine K causal half-Gaussian low-pass kernels (different σ).
+      - Apply K depthwise causal convs to x  -> Y[..., k]
+      - Compute causal local features (mean, var, x)  -> tiny MLP -> softmax over K
+      - Trend = Σ_k w_k * Y_k   (per time, per channel)
+
+    x, trend: [B, T, C]
+    """
+    def __init__(
+        self,
+        sigmas=(2.5, 4.0, 6.0, 9.0, 14.0),
+        truncate=4.0,
+        cond_hidden=32,
+        stat_window=16,
+        add_x_feature=False,          # default False now
+        softmax_temp=0.7,             # NEW: temperature
+        use_zscore=True,              # NEW: z-score instead of raw x
+        entropy_reg=0.0               # NEW: optional gating entropy penalty
+    ):
+        super().__init__()
+        self.sigmas = list(sigmas)
+        self.truncate = float(truncate)
+        self.stat_window = int(stat_window)
+        self.add_x_feature = bool(add_x_feature)
+        self.softmax_temp = float(softmax_temp)
+        self.use_zscore = bool(use_zscore)
+        self.entropy_reg = float(entropy_reg)
+
+        # features: z and logvar (2). Optionally raw x (+1).
+        in_feats = 2 + (1 if self.add_x_feature else 0)
+        self.cond = nn.Sequential(
+            nn.Linear(in_feats, cond_hidden),
+            nn.GELU(),
+            nn.Linear(cond_hidden, len(self.sigmas))
+        )
+
+    @torch.no_grad()
+    def _precompute_kernels(self, x):
+        dtype, device = x.dtype, x.device
+        return [
+            _causal_gauss_kernel1d(s, self.truncate, dtype=dtype, device=device)
+            for s in self.sigmas
+        ]
+
+    def forward(self, x):
+        B, T, C = x.shape
+        kernels = self._precompute_kernels(x)
+
+        # K causal depthwise LP responses
+        Y = torch.stack([_depthwise_conv1d_causal(x, k) for k in kernels], dim=-1)  # [B,T,C,K]
+
+        # Causal local stats
+        m, v = _causal_mean_var(x, win=self.stat_window)  # [B,T,C]
+        z = (x - m) / (v.add(1e-6).sqrt())                # scale-invariant
+        logv = (v + 1e-6).log()
+
+        feats = [z if self.use_zscore else x, logv]       # 2 feats
+        if self.add_x_feature:
+            feats.append(x)                                # optional 3rd feat
+        feats = torch.stack(feats, dim=-1)                 # [B,T,C,F]
+
+        # Conditioner (pointwise MLP)
+        logits = self.cond(feats)                          # [B,T,C,K]
+        w = torch.softmax(logits / self.softmax_temp, dim=-1)
+
+        trend = (Y * w).sum(dim=-1)                        # [B,T,C]
+
+        # If you want to use entropy_reg, return it for the training loop to add:
+        # ent = -(w * (w.clamp_min(1e-8)).log()).sum(dim=-1).mean()
+        # stash for external collection if desired
+        self._last_entropy = -(w * (w.clamp_min(1e-8)).log()).sum(dim=-1).mean().detach()
+
         return trend
