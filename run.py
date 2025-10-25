@@ -75,7 +75,9 @@ parser.add_argument('--adaptive_stat_window', type=int, default=16,
                     help='Causal window length for local mean/var')
 parser.add_argument('--adaptive_add_x_feature', action='store_true',
                     help='Include raw x as a conditioner feature')
-
+# NEW:
+parser.add_argument('--adaptive_softmax_temp', type=float, default=0.7, help='Temperature for adaptive Gaussian softmax (lower = sharper)')
+parser.add_argument('--adaptive_use_zscore', action='store_true', help='Use z-score (x-m)/sqrt(v) instead of raw x in conditioner')
 
 
 # -------- Hybrid EMA + DoG --------
