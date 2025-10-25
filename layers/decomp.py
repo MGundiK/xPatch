@@ -12,6 +12,7 @@ from layers.gaussma import GaussianMA, sigma_from_alpha
 
 # New modules
 from layers.gaussma_adaptive_causal import AdaptiveGaussianTrendCausal  # NEW causal adaptive
+
 from layers.doghybrid import HybridEMA_DoG
 from layers.learnablelp import LearnableLP
 from layers.tc_smoother import TCSmoother
@@ -54,6 +55,9 @@ class DECOMP(nn.Module):
          adaptive_cond_hidden: int = 32,
          adaptive_pool: int = 16,
          adaptive_add_x_feature: bool = True,
+        # NEW:
+         adaptive_softmax_temp: float = 0.7,
+         adaptive_use_zscore: bool = False,
          # DoG hybrid
          dog_sigma1: float = 4.2,
          dog_sigma2: float = 96.0,
@@ -106,6 +110,9 @@ class DECOMP(nn.Module):
                 cond_hidden=adaptive_cond_hidden,
                 stat_window=adaptive_pool,
                 add_x_feature=adaptive_add_x_feature,
+                # NEW pass-through
+                softmax_temp=adaptive_softmax_temp,
+                use_zscore=adaptive_use_zscore,
             )
 
         elif self.ma_type == 'doghybrid':
