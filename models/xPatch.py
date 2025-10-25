@@ -50,8 +50,12 @@ class Model(nn.Module):
             adaptive_truncate      = getattr(configs, "adaptive_truncate", 4.0),
             adaptive_cond_hidden   = getattr(configs, "adaptive_cond_hidden", 32),
             adaptive_stat_window   = getattr(configs, "adaptive_stat_window", 16),
-            adaptive_add_x_feature = getattr(configs, "adaptive_add_x_feature", True),
+            adaptive_add_x_feature = getattr(configs, "adaptive_add_x_feature", False),
+            # NEW:
+            adaptive_softmax_temp  = getattr(configs, "adaptive_softmax_temp", 0.7),
+            adaptive_use_zscore    = getattr(configs, "adaptive_use_zscore", False),
         )
+
 
         # --- Hybrid EMA + DoG ---
         dog_kwargs = dict(
