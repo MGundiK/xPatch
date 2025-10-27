@@ -53,7 +53,7 @@ class DECOMP(nn.Module):
          adaptive_sigmas: Optional[List[float]] = None,
          adaptive_truncate: float = 4.0,
          adaptive_cond_hidden: int = 32,
-         adaptive_pool: int = 16,
+         adaptive_stat_window: int = 16,
          adaptive_add_x_feature: bool = True,
         # NEW:
          adaptive_softmax_temp: float = 0.7,
@@ -103,12 +103,11 @@ class DECOMP(nn.Module):
 
         elif self.ma_type == 'gauss_adaptive_causal':
             sigmas = adaptive_sigmas or [2.5, 4.0, 6.0, 9.0, 14.0]
-            from layers.gaussma_adaptive_causal import AdaptiveGaussianTrendCausal
             self.ma = AdaptiveGaussianTrendCausal(
                 sigmas=sigmas,
                 truncate=adaptive_truncate,
                 cond_hidden=adaptive_cond_hidden,
-                stat_window=adaptive_pool,
+                stat_window=adaptive_stat_window,
                 add_x_feature=adaptive_add_x_feature,
                 # NEW pass-through
                 softmax_temp=adaptive_softmax_temp,
