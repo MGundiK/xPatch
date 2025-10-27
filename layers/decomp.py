@@ -113,14 +113,6 @@ class DECOMP(nn.Module):
                 softmax_temp=adaptive_softmax_temp,
                 use_zscore=adaptive_use_zscore,
             )
-            print("[DECOMP] AGF params:",
-                  dict(sigmas=sigmas,
-                       truncate=adaptive_truncate,
-                       cond_hidden=adaptive_cond_hidden,
-                       stat_window=adaptive_stat_window,
-                       add_x_feature=adaptive_add_x_feature,
-                       softmax_temp=adaptive_softmax_temp,
-                       use_zscore=adaptive_use_zscore))
 
         elif self.ma_type == 'doghybrid':
             self.ma = HybridEMA_DoG(alpha=alpha, sigma1=dog_sigma1, sigma2=dog_sigma2, truncate=dog_truncate)
