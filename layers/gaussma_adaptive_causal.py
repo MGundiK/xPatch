@@ -169,6 +169,11 @@ class AdaptiveGaussianTrendCausal(nn.Module):
             nn.GELU(),
             nn.Linear(cond_hidden, len(self.sigmas))
         )
+        # uniform-mix init
+        with torch.no_grad():
+            nn.init.zeros_(self.cond[-1].weight)
+            nn.init.zeros_(self.cond[-1].bias)
+
 
     @torch.no_grad()
     def _precompute_kernels(self, x):
