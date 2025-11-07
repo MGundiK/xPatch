@@ -293,7 +293,7 @@ class FastMultiEMAMixture(nn.Module):
 
 class DebiasedEMA(nn.Module):
     """
-    \hat{y}_t = y_t / (1 - α^t). α can be fixed or learnable per channel.
+    hat{y}_t = y_t / (1 - α^t). α can be fixed or learnable per channel.
     """
     def __init__(self, channels, alpha=0.9, learnable=False, clamp=(1e-4, 1-1e-4)):
         super().__init__()
