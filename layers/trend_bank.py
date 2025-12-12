@@ -406,14 +406,21 @@ class DebiasedEMA(nn.Module):
         else:
             a = _as_device_dtype(x, self.alpha_fixed).clamp(*self.clamp).view(1, 1, 1).expand(1, 1, C)
         
-        y = _init_like_first(x)
+        one_minus_a = 1 - a
+        
+        # Avoid in-place operations for autograd compatibility
+        y_prev = x[:, 0:1, :]  # [B, 1, C]
+        outs = [y_prev]
+        
         for t in range(1, T):
-            y[:, t, :] = a * y[:, t - 1, :] + (1 - a) * x[:, t, :]
+            y_t = a * outs[-1] + one_minus_a * x[:, t:t+1, :]  # [B, 1, C]
+            outs.append(y_t)
+        
+        y = torch.cat(outs, dim=1)  # [B, T, C]
         
         # Bias correction
-        t_idx = torch.arange(1, T + 1, device=x.device, dtype=x.dtype).view(T, 1)  # [T, 1]
-        aC = a.view(1, C).expand(T, C)
-        denom = (1 - torch.pow(aC, t_idx)).clamp_min(1e-6).unsqueeze(0)  # [1, T, C]
+        t_idx = torch.arange(1, T + 1, device=x.device, dtype=x.dtype).view(1, T, 1)  # [1, T, 1]
+        denom = (1 - torch.pow(a, t_idx)).clamp_min(1e-6)  # [1, T, C]
         return y / denom
 
 
@@ -568,11 +575,17 @@ class AlphaCutoffFilter(nn.Module):
         
         fs = torch.tensor(self.fs, device=x.device, dtype=x.dtype).view(1, 1, 1)
         alpha = 1 - torch.exp(-2 * math.pi * fc / fs)  # (0, 1)
+        one_minus_alpha = 1 - alpha
         
-        y = _init_like_first(x)
+        # Avoid in-place operations for autograd compatibility
+        y_prev = x[:, 0:1, :]  # [B, 1, C]
+        outs = [y_prev]
+        
         for t in range(1, T):
-            y[:, t, :] = alpha * y[:, t - 1, :] + (1 - alpha) * x[:, t, :]
-        return y
+            y_t = alpha * outs[-1] + one_minus_alpha * x[:, t:t+1, :]  # [B, 1, C]
+            outs.append(y_t)
+        
+        return torch.cat(outs, dim=1)  # [B, T, C]
 
 
 # ============================================================
