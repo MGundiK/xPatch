@@ -13,6 +13,8 @@ from layers.gaussma import GaussianMA, sigma_from_alpha
 # New modules
 from layers.gaussma_adaptive_causal import AdaptiveGaussianTrendCausal  # NEW causal adaptive
 
+from layers.adaptive_gaussian_v2 import AdaptiveGaussianTrendV2
+
 from layers.doghybrid import HybridEMA_DoG
 from layers.learnablelp import LearnableLP
 from layers.tc_smoother import TCSmoother
@@ -58,6 +60,16 @@ class DECOMP(nn.Module):
         # NEW:
          adaptive_softmax_temp: float = 0.7,
          adaptive_use_zscore: bool = False,
+
+        # -------- Adaptive Gaussian V2 (Centered) --------
+         adaptive_v2_base_sigmas: Optional[List[float]] = None,
+         adaptive_v2_ref_seq_len: int = 512,
+         adaptive_v2_truncate: float = 4.0,
+         adaptive_v2_cond_hidden: int = 32,
+         adaptive_v2_stat_window: int = 16,
+         adaptive_v2_softmax_temp: float = 0.7,
+         adaptive_v2_use_slope: bool = True,
+        
          # DoG hybrid
          dog_sigma1: float = 4.2,
          dog_sigma2: float = 96.0,
@@ -112,6 +124,18 @@ class DECOMP(nn.Module):
                 # NEW pass-through
                 softmax_temp=adaptive_softmax_temp,
                 use_zscore=adaptive_use_zscore,
+            )
+
+        elif self.ma_type == 'gauss_adaptive_v2':
+            base_sigmas = adaptive_v2_base_sigmas or [2.0, 4.0, 8.0, 16.0, 32.0]
+            self.ma = AdaptiveGaussianTrendV2(
+                base_sigmas=base_sigmas,
+                reference_seq_len=adaptive_v2_ref_seq_len,
+                truncate=adaptive_v2_truncate,
+                cond_hidden=adaptive_v2_cond_hidden,
+                stat_window=adaptive_v2_stat_window,
+                softmax_temp=adaptive_v2_softmax_temp,
+                use_slope=adaptive_v2_use_slope,
             )
 
         elif self.ma_type == 'doghybrid':
