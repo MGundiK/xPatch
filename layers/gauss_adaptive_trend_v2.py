@@ -13,7 +13,7 @@ A conditioning network selects mixture weights over a bank of Gaussian kernels
 based on local signal statistics. The kernels adapt per-timestep based on
 local signal characteristics.
 
-Author: [Your Name]
+Author: Mario Gundic
 Date: 2025
 """
 
