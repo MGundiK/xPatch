@@ -79,6 +79,17 @@ parser.add_argument('--adaptive_add_x_feature', action='store_true',
 parser.add_argument('--adaptive_softmax_temp', type=float, default=0.7, help='Temperature for adaptive Gaussian softmax (lower = sharper)')
 parser.add_argument('--adaptive_use_zscore', action='store_true', help='Use z-score (x-m)/sqrt(v) instead of raw x in conditioner')
 
+# -------- Adaptive Gaussian V2 (Centered) --------
+parser.add_argument('--adaptive_v2_base_sigmas',
+    type=lambda s: [float(x) for x in s.split(',')],
+    default=[2.0,4.0,8.0,16.0,32.0])
+parser.add_argument('--adaptive_v2_ref_seq_len', type=int, default=512)
+parser.add_argument('--adaptive_v2_truncate', type=float, default=4.0)
+parser.add_argument('--adaptive_v2_cond_hidden', type=int, default=32)
+parser.add_argument('--adaptive_v2_stat_window', type=int, default=16)
+parser.add_argument('--adaptive_v2_softmax_temp', type=float, default=0.7)
+parser.add_argument('--adaptive_v2_use_slope', action='store_true', default=True)
+parser.add_argument('--adaptive_v2_no_slope', action='store_true', default=False)
 
 # -------- Hybrid EMA + DoG --------
 parser.add_argument('--dog_sigma1', type=float, default=4.2, help='DoG small sigma')
@@ -238,7 +249,9 @@ def _parse_csv_list(s):
     return [float(x) for x in s.split(',')]
 args.mema_init_alphas = _parse_csv_list(args.mema_init_alphas)
 
-
+if args.adaptive_v2_no_slope:
+    args.adaptive_v2_use_slope = False
+    
 # Parse adaptive_sigmas if provided as CSV
 def _parse_float_list_csv(s):
     if s is None:
