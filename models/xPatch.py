@@ -56,6 +56,17 @@ class Model(nn.Module):
             adaptive_use_zscore    = getattr(configs, "adaptive_use_zscore", False),
         )
 
+        # --- Adaptive Gaussian V2 (Centered) ---
+        adaptive_v2_kwargs = dict(
+            adaptive_v2_base_sigmas   = getattr(configs, "adaptive_v2_base_sigmas", None),
+            adaptive_v2_ref_seq_len   = getattr(configs, "adaptive_v2_ref_seq_len", 512),
+            adaptive_v2_truncate      = getattr(configs, "adaptive_v2_truncate", 4.0),
+            adaptive_v2_cond_hidden   = getattr(configs, "adaptive_v2_cond_hidden", 32),
+            adaptive_v2_stat_window   = getattr(configs, "adaptive_v2_stat_window", 16),
+            adaptive_v2_softmax_temp  = getattr(configs, "adaptive_v2_softmax_temp", 0.7),
+            adaptive_v2_use_slope     = getattr(configs, "adaptive_v2_use_slope", True),
+        )
+
 
         # --- Hybrid EMA + DoG ---
         dog_kwargs = dict(
@@ -134,6 +145,7 @@ class Model(nn.Module):
             # legacy / existing:
             **gauss_kwargs,
             **adaptive_kwargs,
+            **adaptive_v2_kwargs,
             **dog_kwargs,
             **lp_kwargs,
             **tcn_kwargs,
