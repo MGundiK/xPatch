@@ -91,6 +91,26 @@ parser.add_argument('--adaptive_v2_softmax_temp', type=float, default=0.7)
 parser.add_argument('--adaptive_v2_use_slope', action='store_true', default=True)
 parser.add_argument('--adaptive_v2_no_slope', action='store_true', default=False)
 
+
+
+# ---- Phase 2: Multi-scale patching ----
+parser.add_argument('--use_multiscale', action='store_true', default=False,
+                    help='Use multi-scale patch embedding')
+parser.add_argument('--patch_lens', type=str, default='8,16,32',
+                    help='Comma-separated patch lengths (e.g. "8,16,32")')
+parser.add_argument('--patch_strides', type=str, default=None,
+                    help='Comma-separated strides (default: patch_len//2 each)')
+
+# ---- Phase 2: Cross-patch attention ----
+parser.add_argument('--use_cross_attn', action='store_true', default=False,
+                    help='Add cross-patch attention after conv backbone')
+parser.add_argument('--attn_heads', type=int, default=4,
+                    help='Number of attention heads')
+parser.add_argument('--attn_dropout', type=float, default=0.1,
+                    help='Attention dropout rate')
+parser.add_argument('--attn_use_ffn', action='store_true', default=False,
+                    help='Include FFN in attention block')
+
 # -------- Hybrid EMA + DoG --------
 parser.add_argument('--dog_sigma1', type=float, default=4.2, help='DoG small sigma')
 parser.add_argument('--dog_sigma2', type=float, default=96.0, help='DoG large sigma')
