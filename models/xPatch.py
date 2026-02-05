@@ -238,17 +238,36 @@ class Model(nn.Module):
             elif trend_head == "ds_mlp":
                 trend_cfg = {k: v for k, v in ds_mlp_kwargs.items() if v is not None}
         # else leave None to trigger baseline in Network
+
+        # ---- Phase 2: Architecture modifications ----
+        arch_kwargs = {}
+
+        if getattr(configs, 'use_multiscale', False):
+            arch_kwargs['use_multiscale'] = True
+            pl_str = getattr(configs, 'patch_lens', '8,16,32')
+            arch_kwargs['ms_patch_lens'] = [int(x) for x in pl_str.split(',')]
+            st_str = getattr(configs, 'patch_strides', None)
+            if st_str is not None:
+                arch_kwargs['ms_patch_strides'] = [int(x) for x in st_str.split(',')]
+
+        if getattr(configs, 'use_cross_attn', False):
+            arch_kwargs['use_cross_attn'] = True
+            arch_kwargs['attn_heads']   = getattr(configs, 'attn_heads', 4)
+            arch_kwargs['attn_dropout'] = getattr(configs, 'attn_dropout', 0.1)
+            arch_kwargs['attn_use_ffn'] = getattr(configs, 'attn_use_ffn', False)
         
         # ---------------- Create Network (Network handles registry + fallback) ---------------
+
         self.net = Network(
-            seq_len=seq_len,
-            pred_len=pred_len,
-            patch_len=patch_len,
-            stride=stride,
-            padding_patch=padding_patch,
-            trend_head=trend_head,
-            trend_cfg=trend_cfg,
-        )
+                seq_len=seq_len,
+                pred_len=pred_len,
+                patch_len=patch_len,
+                stride=stride,
+                padding_patch=padding_patch,
+                trend_head=trend_head,
+                trend_cfg=trend_cfg,
+                **arch_kwargs,
+            )
 
 
     def forward(self, x):
