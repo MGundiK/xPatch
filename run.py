@@ -93,6 +93,9 @@ parser.add_argument('--adaptive_v2_no_slope', action='store_true', default=False
 
 
 
+
+
+
 # ---- Phase 2: Multi-scale patching ----
 parser.add_argument('--use_multiscale', action='store_true', default=False,
                     help='Use multi-scale patch embedding')
@@ -110,6 +113,18 @@ parser.add_argument('--attn_dropout', type=float, default=0.1,
                     help='Attention dropout rate')
 parser.add_argument('--attn_use_ffn', action='store_true', default=False,
                     help='Include FFN in attention block')
+
+# ---- Phase 3: RoRA (Rotational Rank Adaptation) ----
+parser.add_argument('--use_rora', action='store_true', default=False,
+                    help='Add RoRA (rotational rank adaptation) for geometric reorientation')
+parser.add_argument('--rora_rank', type=int, default=4,
+                    help='Rank of skew-symmetric generator (controls expressivity)')
+parser.add_argument('--rora_mode', type=str, default='feature',
+                    choices=['feature', 'patch', 'both'],
+                    help='RoRA mode: feature (within patch), patch (across patches), or both')
+parser.add_argument('--rora_method', type=str, default='cayley',
+                    choices=['cayley', 'taylor'],
+                    help='RoRA computation method: cayley (exact) or taylor (approx)')
 
 # -------- Hybrid EMA + DoG --------
 parser.add_argument('--dog_sigma1', type=float, default=4.2, help='DoG small sigma')
