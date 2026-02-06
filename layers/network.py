@@ -1,10 +1,13 @@
 # layers/network.py
 # xPatch Network with configurable trend stream, optional multi-scale patching,
-# and optional cross-patch attention.
+# optional cross-patch attention, and optional RoRA (Rotational Rank Adaptation).
 #
-# Backward compatible: when use_multiscale=False and use_cross_attn=False,
-# the architecture is IDENTICAL to the original (same layers, same shapes,
-# same forward path).
+# Backward compatible: when use_multiscale=False, use_cross_attn=False, and
+# use_rora=False, the architecture is IDENTICAL to the original.
+#
+# RoRA provides geometric reorientation of patch representations, based on the
+# insight that the conv backbone creates piecewise-linear geometry that may
+# need global rotation for the linear head to separate effectively.
 
 import torch
 from torch import nn
@@ -17,6 +20,13 @@ from layers.trend_heads import (
     DeltaTrendHead,
     DownsampledMLPTrendHead,
 )
+
+# Import RoRA (optional, graceful fallback if not available)
+try:
+    from layers.rora import PatchRoRA, RoRABlock
+    RORA_AVAILABLE = True
+except ImportError:
+    RORA_AVAILABLE = False
 
 
 _TREND_FACTORY = {
@@ -35,11 +45,12 @@ class Network(nn.Module):
 
     Architecture (seasonal stream):
         patches -> fc1 (expand) -> depthwise conv (compress) + residual
-        -> pointwise conv -> [optional attention] -> flatten head
+        -> pointwise conv -> [optional attention] -> [optional RoRA] -> flatten head
 
-    New options (Phase 2):
+    Options:
         use_multiscale : extract patches at multiple resolutions
         use_cross_attn : add lightweight self-attention after conv backbone
+        use_rora       : add rotational rank adaptation (geometric reorientation)
 
     When multi-scale is enabled, patches from all scales are projected to
     d_model = patch_len and concatenated along the token dimension.  The
@@ -65,6 +76,11 @@ class Network(nn.Module):
         attn_heads=4,
         attn_dropout=0.1,
         attn_use_ffn=False,
+        # ---- Phase 3: RoRA (Rotational Rank Adaptation) ----
+        use_rora=False,
+        rora_rank=4,
+        rora_mode='feature',      # 'feature', 'patch', or 'both'
+        rora_method='cayley',     # 'cayley' or 'taylor'
     ):
         super(Network, self).__init__()
 
@@ -75,6 +91,11 @@ class Network(nn.Module):
         self.padding_patch = padding_patch
         self.use_multiscale = use_multiscale and (ms_patch_lens is not None)
         self.use_cross_attn = use_cross_attn
+        self.use_rora = use_rora and RORA_AVAILABLE
+        
+        if use_rora and not RORA_AVAILABLE:
+            print("[xPatch][Network] Warning: use_rora=True but RoRA module not available. "
+                  "Ensure layers/rora.py exists. Continuing without RoRA.")
 
         # Working dimension = patch_len (reuses original backbone exactly)
         d_model = patch_len
@@ -172,6 +193,18 @@ class Network(nn.Module):
                 )
             else:
                 self.attn_ffn = None
+
+        # ==================================================================
+        # Optional RoRA (Rotational Rank Adaptation)
+        # ==================================================================
+        if self.use_rora:
+            self.rora = PatchRoRA(
+                d_model=d_model,
+                num_patches=self.patch_num,
+                rank=rora_rank,
+                mode=rora_mode,
+                method=rora_method,
+            )
 
         # ==================================================================
         # Flatten Head
@@ -283,6 +316,10 @@ class Network(nn.Module):
             s = residual + self.attn_drop(s_attn)
             if self.attn_ffn is not None:
                 s = s + self.attn_ffn(s)
+
+        # ============== Optional RoRA (Geometric Reorientation) ==============
+        if self.use_rora:
+            s = self.rora(s)
 
         # ============== Flatten Head ==============
         s = self.flatten1(s)
