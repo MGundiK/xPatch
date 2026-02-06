@@ -255,6 +255,12 @@ class Model(nn.Module):
             arch_kwargs['attn_heads']   = getattr(configs, 'attn_heads', 4)
             arch_kwargs['attn_dropout'] = getattr(configs, 'attn_dropout', 0.1)
             arch_kwargs['attn_use_ffn'] = getattr(configs, 'attn_use_ffn', False)
+
+        if getattr(configs, 'use_rora', False):
+            arch_kwargs['use_rora'] = True
+            arch_kwargs['rora_rank']   = getattr(configs, 'rora_rank', 4)
+            arch_kwargs['rora_mode']   = getattr(configs, 'rora_mode', 'feature')
+            arch_kwargs['rora_method'] = getattr(configs, 'rora_method', 'cayley')
         
         # ---------------- Create Network (Network handles registry + fallback) ---------------
 
