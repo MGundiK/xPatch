@@ -265,15 +265,15 @@ class Model(nn.Module):
         # ---------------- Create Network (Network handles registry + fallback) ---------------
 
         self.net = Network(
-                seq_len=seq_len,
-                pred_len=pred_len,
-                patch_len=patch_len,
-                stride=stride,
-                padding_patch=padding_patch,
-                trend_head=trend_head,
-                trend_cfg=trend_cfg,
-                **arch_kwargs,
-            )
+            seq_len=seq_len,
+            pred_len=pred_len,
+            patch_len=patch_len,
+            stride=stride,
+            padding_patch=padding_patch,
+            trend_head=trend_head,
+            trend_cfg=trend_cfg,
+            **arch_kwargs,
+        )
 
 
     def forward(self, x):
